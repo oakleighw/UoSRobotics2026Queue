@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Robotics Arena Queue Status</title>
+    <meta http-equiv="refresh" content="10"> 
+    <style>
+        /* Basic CSS for readability and clear separation */
+        body { font-family: sans-serif; margin: 20px; background-color: #f4f4f9; }
+        .container { max-width: 900px; margin: auto; }
+        h1 { color: #0056b3; }
+        .queue-list { list-style: none; padding: 0; }
+        .queue-item { 
+            border: 1px solid #ddd; 
+            padding: 15px; 
+            margin-bottom: 8px; 
+            background-color: #ffffff;
+            border-radius: 6px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+        .priority { background-color: #fff0f0; border-left: 5px solid #cc0000; }
+        .join-form { margin-bottom: 40px; padding: 20px; border: 2px solid #0056b3; border-radius: 8px; background-color: #e6f7ff; }
+        .team-id-input { padding: 10px; margin-right: 15px; border: 1px solid #ccc; border-radius: 4px; }
+        
+        /* Supervisor Section Styling */
+        .supervisor-panel { background-color: #e9e9e9; padding: 20px; border-radius: 8px; margin-top: 30px; }
+        .supervisor-controls button { 
+            padding: 10px 15px; 
+            margin: 5px; 
+            border: none; 
+            border-radius: 4px; 
+            cursor: pointer; 
+            font-weight: bold;
+        }
+        .btn-success { background-color: #4CAF50; color: white; }
+        .btn-warning { background-color: #ff9800; color: white; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🤖 Robotics Arena Queue Status</h1>
+
+        <div class="join-form">
+            <h3>Join the Queue</h3>
+            <form method="POST" action="{{ url_for('join_queue') }}">
+                <label for="team_id">Enter Team ID:</label>
+                <input type="text" id="team_id" name="team_id" class="team-id-input" placeholder="e.g., Team_Alpha" required>
+                <button type="submit">Join Queue</button>
+            </form>
+            <p><small>Note: You cannot re-join while already waiting.</small></p>
+        </div>
+
+        <h2>Current Queue (Next Team is #1)</h2>
+        <ol class="queue-list">
+            {% for entry in queue %}
+                {% set team_runs = teams_history.get(entry.team_id, 0) %}
+                <li class="queue-item {% if entry.priority_re_run %}priority{% endif %}">
+                    <strong>#{{ loop.index }}</strong>: **{{ entry.team_id }}** {% if entry.priority_re_run %} <span style="color: red;">(🚨 PRIORITY RE-RUN)</span>{% endif %}
+                    <br>
+                    <small>
+                        Current Runs: **{{ team_runs }}** | Submitted: {{ entry.timestamp.split('T')[1].split('.')[0] }}
+                    </small>
+                </li>
+            {% else %}
+                <li class="queue-item">The arena is free! No teams are currently waiting.</li>
+            {% endfor %}
+        </ol>
+
+        <div class="supervisor-panel">
+            <h3>Supervisor Control Panel (Arena 1)</h3>
+            
+            {% if queue %}
+                {% set current_team = queue[0] %}
+                <p>Currently Running: **{{ current_team.team_id }}**</p>
+                
+                <div class="supervisor-controls">
+                    <form method="POST" action="{{ url_for('next_team') }}" style="display:inline;">
+                        <input type="hidden" name="team_id" value="{{ current_team.team_id }}">
+                        <button type="submit" class="btn-success" onclick="return confirm('Confirm SUCCESSFUL run for {{ current_team.team_id }}? This will INCREMENT their run count.');">
+                            ✅ Successful Run / Next Team
+                        </button>
+                    </form>
+
+                    <form method="POST" action="{{ url_for('fail_rerun') }}" style="display:inline;">
+                        <input type="hidden" name="team_id" value="{{ current_team.team_id }}">
+                        <button type="submit" class="btn-warning" onclick="return confirm('Confirm TECHNICAL FAILURE for {{ current_team.team_id }}? This will grant a priority re-run.');">
+                            ⚠️ Technical Failure / Priority Re-Run
+                        </button>
+                    </form>
+                </div>
+            {% else %}
+                <p>Queue is empty. Waiting for teams to join.</p>
+            {% endif %}
+        </div>
+        
+    </div>
+</body>
+</html>

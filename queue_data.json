@@ -1,0 +1,17 @@
+[
+  {
+    "team_id": "Team Gamma",
+    "timestamp": "2025-12-03T11:20:00.123456",
+    "priority_re_run": false
+  },
+  {
+    "team_id": "Team Alpha",
+    "timestamp": "2025-12-03T11:25:30.456789",
+    "priority_re_run": false
+  },
+  {
+    "team_id": "team_1",
+    "timestamp": "2025-12-03T11:25:50.650623",
+    "priority_re_run": true
+  }
+]
