@@ -1,568 +1,389 @@
-import json
-import os
-import threading
+from flask import Flask, render_template, request, redirect, url_for, flash
 import time
 from datetime import datetime, timedelta
-from flask import Flask, request, render_template, redirect, url_for, session, flash
 
-# --- Configuration & File Paths ---
-QUEUE_FILE = 'queue_data.json'
-RUNS_FILE = 'runs_tracker.json'
-CONFIG_FILE = 'config.json' 
-MAX_CONCURRENT_RUNS = 4  # FIXED MAX SLOTS
-DEFAULT_RUN_TIME_SECONDS = 300 
+app = Flask(__name__)
+app.secret_key = 'supersecretkey'
 
-# --- Config Helper Functions ---
+# Global State
+queue = []
+active_runs = {
+    1: {'team_id': None, 'start_time': None, 'status': 'IDLE', 'time_paused_at': None, 'time_remaining': None},
+    2: {'team_id': None, 'start_time': None, 'status': 'IDLE', 'time_paused_at': None, 'time_remaining': None},
+    3: {'team_id': None, 'start_time': None, 'status': 'IDLE', 'time_paused_at': None, 'time_remaining': None},
+    4: {'team_id': None, 'start_time': None, 'status': 'IDLE', 'time_paused_at': None, 'time_remaining': None},
+}
+# Default run time is 5 minutes (300 seconds)
+RUN_TIME_SECONDS = 300 
+teams_history = {} # {'TEAM_A': 2, 'TEAM_B': 1}
 
-def load_config():
-    """Loads configuration data, only tracking run_time."""
-    if not os.path.exists(CONFIG_FILE):
-        return {'run_time': DEFAULT_RUN_TIME_SECONDS}
-    try:
-        with open(CONFIG_FILE, 'r') as f:
-            config = json.load(f)
-            if 'run_time' not in config:
-                 config['run_time'] = DEFAULT_RUN_TIME_SECONDS
-            return config
-    except json.JSONDecodeError:
-        print(f"Error decoding JSON from {CONFIG_FILE}. Returning default config.")
-        return {'run_time': DEFAULT_RUN_TIME_SECONDS}
+# --- Helper Functions for Time and Display ---
 
-def save_config(config_data):
-    """Writes configuration data to a JSON file."""
-    with open(CONFIG_FILE, 'w') as f:
-        json.dump(config_data, f, indent=2)
-
-# Load initial configuration
-APP_CONFIG = load_config()
-
-# --- 1. Global State Management (Fixed 4 Slots) ---
-
-def initialize_active_runs(max_runs=MAX_CONCURRENT_RUNS):
-    """Creates the fixed 4-slot structure with an assigned_run_time field."""
-    return {
-        str(i): {
-            'team_id': None, 
-            'start_time': None,       
-            'time_spent_sec': 0,      
-            'timer_thread': None,     
-            'status': 'IDLE',
-            'assigned_run_time_sec': DEFAULT_RUN_TIME_SECONDS # Key for run time stability
-        } for i in range(1, max_runs + 1)
-    }
-
-active_runs = initialize_active_runs()
-active_lock = threading.Lock() 
-
-# --- 2. Flask Initialization ---
-APP = Flask(__name__) 
-APP.secret_key = 'your_super_secret_key_here'
-
-
-# --- 3. JSON Helper Functions ---
-
-def load_data(filename):
-    """Loads JSON data from a file."""
-    if not os.path.exists(filename):
-        return [] if filename == QUEUE_FILE else {}
-    try:
-        with open(filename, 'r') as f:
-            return json.load(f)
-    except json.JSONDecodeError:
-        return [] if filename == QUEUE_FILE else {}
-
-def save_data(filename, data):
-    """Writes data to a JSON file."""
-    with open(filename, 'w') as f:
-        json.dump(data, f, indent=2)
-
-
-# --- 4. Core Timer & Setting Logic ---
-
-def get_current_run_time():
-    """Retrieves the current global run time from the session/config."""
-    return session.get('run_time', APP_CONFIG['run_time'])
-
-@APP.route('/set_run_time', methods=['POST'])
-def set_run_time():
-    """Supervisor action: Sets the desired run time globally (will only affect NEW runs)."""
-    run_time_minutes = request.form.get('run_time_minutes', '')
+def get_time_remaining(run_data):
+    """Calculates the time remaining for a run."""
+    if run_data['status'] == 'IDLE':
+        return 0
+    if run_data['status'] == 'PAUSED' or run_data['status'] == 'DYSFUNCTIONAL':
+        return run_data['time_remaining']
     
-    try:
-        minutes = int(run_time_minutes)
-        if minutes > 0:
-            new_run_time_seconds = minutes * 60
+    # Calculate time passed
+    elapsed_time = time.time() - run_data['start_time']
+    
+    # Calculate remaining time
+    remaining = max(0, RUN_TIME_SECONDS - elapsed_time)
+    
+    # If time runs out, automatically move to REVIEW (This is a simplified automation)
+    if remaining == 0:
+        team_id = run_data['team_id']
+        slot_id = next(id for id, data in active_runs.items() if data['team_id'] == team_id)
+        
+        # Mark the run for review
+        team_index = next((i for i, item in enumerate(queue) if item['team_id'] == team_id and item['status'] == 'RUNNING'), None)
+        if team_index is not None:
+            queue[team_index]['status'] = 'REVIEW'
+            # Ensure non-priority runs don't clear the flag if they time out
+            if not queue[team_index]['priority_re_run']:
+                 queue[team_index]['priority_re_run'] = False
+        
+        # Clear the active slot
+        active_runs[slot_id] = {'team_id': None, 'start_time': None, 'status': 'IDLE', 'time_paused_at': None, 'time_remaining': None}
+        flash(f'Team {team_id} run has ended (time out) and moved to **Review Queue**!', 'warning')
+        return 0
+
+    return remaining
+
+def format_seconds(seconds):
+    """Formats seconds into MM:SS string."""
+    minutes = int(seconds // 60)
+    seconds = int(seconds % 60)
+    return f"{minutes:02d}:{seconds:02d}"
+
+# --- NEW PRIORITY SORTING FUNCTION ---
+
+def sort_waiting_queue_priority(queue_list, history):
+    """
+    Sorts the waiting queue based on the new custom rules:
+    1. Highest Priority (Tier 1): Teams with 0 total successful runs.
+    2. Secondary Priority (Tier 2): Teams with priority_re_run == True (Dysfunctional re-run).
+    3. Tertiary Priority (Tier 3): All other teams, sorted by lowest run count.
+    
+    FIFO (original index) is used as a tie-breaker within each tier.
+    """
+    
+    # Separate the WAITING teams
+    waiting_teams = [team for team in queue_list if team['status'] == 'WAITING']
+    
+    def get_sort_key(team):
+        team_id = team['team_id']
+        run_count = history.get(team_id, 0)
+        is_priority = team.get('priority_re_run', False)
+        
+        # We use the team's original index as a final tie-breaker (FIFO)
+        fifo_index = queue_list.index(team)
+        
+        # --- TIER DETERMINATION ---
+        
+        # Tier 1 (0): Zero-run teams (Highest priority)
+        if run_count == 0:
+            return (0, run_count, fifo_index) # run_count is 0 here
+        
+        # Tier 2 (1): Dysfunctional Re-run teams (Second highest priority)
+        elif is_priority:
+            return (1, run_count, fifo_index)
             
-            # Update Session (for immediate use) and Persistent Config
-            session['run_time'] = new_run_time_seconds
-            config = load_config()
-            config['run_time'] = new_run_time_seconds
-            save_config(config)
-            
-            flash(f"Global run time set to {minutes} minutes. **This will only affect runs started from now on.**", "success")
+        # Tier 3 (2): Standard teams (Lowest priority)
         else:
-            flash("Invalid run time entered. Must be greater than 0.", "error")
-    except ValueError:
-        flash("Invalid input for run time.", "error")
-        
-    return redirect(url_for('index'))
+            # Within Tier 3, we still sort by lowest run count first
+            return (2, run_count, fifo_index) 
 
-
-def cancel_active_timer(slot_id):
-    """Helper to safely cancel the currently running timer thread for a specific slot."""
-    global active_runs
+    # Sort the waiting teams using the custom key
+    sorted_waiting_teams = sorted(waiting_teams, key=get_sort_key)
     
-    run_slot = active_runs.get(slot_id)
-    if not run_slot:
-        return
+    return sorted_waiting_teams
 
-    if run_slot.get('timer_thread') and run_slot['timer_thread'].is_alive():
-        run_slot['timer_thread'].cancel()
-        print(f"Existing timer thread for Slot {slot_id} cancelled.")
-    run_slot['timer_thread'] = None
-
-
-def start_run_timer(slot_id, remaining_time_sec):
-    """Starts a non-blocking timer thread for the remaining run time."""
-    global active_runs
+def get_next_team_in_queue():
+    """Returns the team_id of the next team to run based on the new priority logic."""
+    # We must sort the list based on the new rules before picking the first one
+    sorted_waiting = sort_waiting_queue_priority(queue, teams_history)
     
-    run_slot = active_runs[slot_id]
-    cancel_active_timer(slot_id)
-    
-    def timer_expired():
-        """Executed when the run time is up."""
-        with active_lock:
-            team_id = run_slot.get('team_id')
-            if team_id and run_slot['status'] == 'RUNNING':
-                
-                queue = load_data(QUEUE_FILE)
-                review_entry = {
-                    'team_id': team_id,
-                    'timestamp': datetime.now().isoformat(), 
-                    'priority_re_run': False,
-                    'status': 'REVIEW'
-                }
-                
-                queue.append(review_entry)
-                save_data(QUEUE_FILE, queue)
+    if sorted_waiting:
+        return sorted_waiting[0]['team_id']
+    return None
 
-                # Reset slot to IDLE state
-                run_slot.update({
-                    'team_id': None, 
-                    'start_time': None, 
-                    'time_spent_sec': 0, 
-                    'timer_thread': None, 
-                    'status': 'IDLE',
-                    'assigned_run_time_sec': DEFAULT_RUN_TIME_SECONDS # Reset time field
-                })
-                print(f"Run time expired for {team_id} in Slot {slot_id}. Moved to review.")
-            
-    timer_thread = threading.Timer(remaining_time_sec, timer_expired)
-    timer_thread.daemon = True 
-    timer_thread.start()
-    
-    run_slot['timer_thread'] = timer_thread
-    print(f"Timer started for {run_slot.get('team_id', 'Unknown')} in Slot {slot_id} for {remaining_time_sec:.2f} seconds.")
+# --- Flask Routes ---
 
-
-# --- 5. Core Sorting Logic (Same as before) ---
-
-def get_sorted_queue():
-    """Loads active queue and run history, then sorts the queue based on priority rules."""
-    waiting_queue = load_data(QUEUE_FILE)
-    teams_history = load_data(RUNS_FILE)
-
-    def custom_sort_key(entry):
-        runs = teams_history.get(entry.get('team_id'), 0)
-        
-        status = entry.get('status', 'WAITING')
-        try:
-            timestamp = datetime.fromisoformat(entry.get('timestamp'))
-        except (ValueError, TypeError):
-            timestamp = datetime.max 
-        
-        return (
-            status != 'REVIEW',
-            not entry.get('priority_re_run', False),
-            runs,
-            timestamp
-        )
-
-    return sorted(waiting_queue, key=custom_sort_key)
-
-
-# --- 6. Flask Web Routes (Display) ---
-
-@APP.route('/')
+@app.route('/')
 def index():
-    """Renders the main queue page, calculating time remaining using the slot's assigned time."""
-    global active_runs
-    
-    GLOBAL_CONFIG_RUN_TIME = get_current_run_time()
-    active_runs_display = {} 
-    
-    with active_lock:
-        for slot_id, slot_data in active_runs.items():
-            
-            time_remaining = None
-            
-            # Use the time ASSIGNED to the run when it started.
-            assigned_time = slot_data.get('assigned_run_time_sec', DEFAULT_RUN_TIME_SECONDS)
-            time_remaining_sec = assigned_time - slot_data['time_spent_sec'] 
+    # 1. Update/Clean up active runs and calculate remaining time
+    active_runs_display = {}
+    next_waiting_team_id = get_next_team_in_queue()
 
-            if slot_data['team_id']:
-                
-                if slot_data['status'] == 'RUNNING':
-                    start = datetime.fromisoformat(slot_data['start_time'])
-                    elapsed_current_segment = (datetime.now() - start).total_seconds()
-                    total_time_spent = slot_data['time_spent_sec'] + elapsed_current_segment
-                    time_remaining_sec = assigned_time - total_time_spent 
-                    
-                    if time_remaining_sec > 0:
-                        minutes = int(time_remaining_sec // 60)
-                        seconds = int(time_remaining_sec % 60)
-                        time_remaining = f"{minutes:02d}:{seconds:02d}"
-                    else:
-                        time_remaining = "00:00"
-                        
-                elif slot_data['status'] == 'PAUSED' or slot_data['status'] == 'DYSFUNCTIONAL':
-                    if time_remaining_sec > 0:
-                        minutes = int(time_remaining_sec // 60)
-                        seconds = int(time_remaining_sec % 60)
-                        time_remaining = f"{minutes:02d}:{seconds:02d} ({slot_data['status']})"
-                    else:
-                        time_remaining = "00:00 (EXPIRED)"
-            
+    for slot_id, data in active_runs.items():
+        if data['status'] != 'IDLE':
+            time_rem = get_time_remaining(data)
+            data['time_remaining'] = time_rem # Update remaining time for paused/dysfunctional slots
             active_runs_display[slot_id] = {
-                'slot_data': slot_data,
-                'time_remaining': time_remaining,
-                'time_remaining_sec': max(0, time_remaining_sec)
+                'slot_data': data,
+                'time_remaining_sec': int(time_rem),
+                'time_remaining': format_seconds(time_rem)
+            }
+        else:
+            active_runs_display[slot_id] = {
+                'slot_data': data,
+                'time_remaining_sec': 0,
+                'time_remaining': '00:00'
             }
             
-    queue = get_sorted_queue()
-    teams_history = load_data(RUNS_FILE)
-    
-    review_team = next((team for team in queue if team.get('status') == 'REVIEW'), None)
-    
+    # 2. Re-sort the queue list for display using the new function
+    # NOTE: The *main* queue list `queue` is *not* permanently re-ordered here,
+    # only the WAITING subset of teams is sorted for display/selection.
+    # We create a temporary list to send to the template:
+    display_queue = [team for team in queue if team['status'] != 'WAITING']
+    display_queue.extend(sort_waiting_queue_priority(queue, teams_history))
+
+
+    # 3. Get the *actual* next team object for the idle slot buttons
+    next_waiting_team = next((team for team in display_queue if team['team_id'] == next_waiting_team_id), None)
+
     return render_template('index.html', 
-                           queue=queue, 
-                           teams_history=teams_history,
-                           active_runs_display=active_runs_display,
-                           MAX_RUNS=MAX_CONCURRENT_RUNS,
-                           review_team=review_team,
-                           RUN_TIME_SECONDS=GLOBAL_CONFIG_RUN_TIME) 
+                           queue=display_queue, # Use the sorted list for display
+                           active_runs_display=active_runs_display, 
+                           next_waiting_team=next_waiting_team, # This is used by the IDLE slot button
+                           RUN_TIME_SECONDS=RUN_TIME_SECONDS,
+                           teams_history=teams_history)
 
-
-@APP.route('/join', methods=['POST'])
+@app.route('/join_queue', methods=['POST'])
 def join_queue():
-    """Adds a team to the waiting queue."""
-    team_id = request.form.get('team_id', '').strip()
+    team_id = request.form['team_id'].upper().strip()
     
     if not team_id:
+        flash('Team ID cannot be empty.', 'error')
         return redirect(url_for('index'))
-
-    queue = load_data(QUEUE_FILE)
+        
+    # Check if the team is already running or waiting
+    if any(item['team_id'] == team_id and item['status'] in ('WAITING', 'RUNNING') for item in queue):
+        flash(f'Team **{team_id}** is already in the queue or currently running.', 'warning')
+        return redirect(url_for('index'))
     
-    # Check if team is in queue, active, or review (REVIEW teams are already in queue)
-    if any(entry['team_id'] == team_id for entry in queue if entry['status'] != 'REVIEW'): 
-        flash(f"Team {team_id} is already in the waiting queue or in review.", "error")
-        return redirect(url_for('index'))
-
-    with active_lock:
-        if any(run['team_id'] == team_id for run in active_runs.values()):
-            flash(f"Team {team_id} is currently running in an arena slot.", "error")
-            return redirect(url_for('index'))
-
-    new_entry = {
+    # Add new team to the queue with default status
+    queue.append({
         'team_id': team_id,
-        'timestamp': datetime.now().isoformat(), 
-        'priority_re_run': False,
-        'status': 'WAITING'
-    }
-    
-    queue.append(new_entry)
-    save_data(QUEUE_FILE, queue)
-
-    history = load_data(RUNS_FILE)
-    if team_id not in history:
-        history[team_id] = 0
-        save_data(RUNS_FILE, history)
-    
-    flash(f"Team {team_id} added to the waiting queue.", "success")
+        'status': 'WAITING',
+        'priority_re_run': False, # New teams start with no priority
+        'time_added': time.time()
+    })
+    flash(f'Team **{team_id}** added to the waiting queue.', 'success')
     return redirect(url_for('index'))
 
-
-# --- 7. Flask Web Routes (Supervisor Actions) ---
-
-@APP.route('/start_run', methods=['POST'])
+@app.route('/start_run', methods=['POST'])
 def start_run():
-    """Starts the next waiting team in an IDLE slot."""
-    global active_runs
+    slot_id = int(request.form['slot_id'])
     
-    slot_id = request.form.get('slot_id')
+    # Get the next team according to the *new* priority logic
+    team_id_to_start = get_next_team_in_queue()
     
-    if not slot_id or slot_id not in active_runs:
-        flash("Invalid slot ID provided for start run.", "error")
+    if not team_id_to_start:
+        flash('Cannot start run: Waiting queue is empty.', 'error')
         return redirect(url_for('index'))
 
-    with active_lock:
-        run_slot = active_runs[slot_id]
-        if run_slot['team_id'] is not None:
-            flash(f"Slot {slot_id} is already in use.", "error")
-            return redirect(url_for('index'))
-
-    sorted_queue = get_sorted_queue()
-    # Only pull WAITING teams for a new start
-    waiting_team = next((team for team in sorted_queue if team.get('status') == 'WAITING'), None) 
-    
-    if not waiting_team:
-        flash("No teams in WAITING state to start a run.", "warning")
+    if active_runs[slot_id]['status'] != 'IDLE':
+        flash(f'Slot {slot_id} is not idle.', 'error')
         return redirect(url_for('index'))
 
-    queue = load_data(QUEUE_FILE)
-    
-    try:
-        # Find the specific entry in the unsorted queue to pop
-        index_to_remove = next(i for i, entry in enumerate(queue) 
-                               if entry['team_id'] == waiting_team['team_id'] and entry['timestamp'] == waiting_team['timestamp'])
+    # 1. Update the active run slot
+    active_runs[slot_id] = {
+        'team_id': team_id_to_start,
+        'start_time': time.time(),
+        'status': 'RUNNING',
+        'time_paused_at': None,
+        'time_remaining': RUN_TIME_SECONDS
+    }
+
+    # 2. Update the team's status in the queue from WAITING to RUNNING
+    team_index = next((i for i, item in enumerate(queue) if item['team_id'] == team_id_to_start and item['status'] == 'WAITING'), None)
+    if team_index is not None:
+        queue[team_index]['status'] = 'RUNNING'
+        flash(f'Team **{team_id_to_start}** started run in Slot **{slot_id}**.', 'success')
+    else:
+        # Should not happen if get_next_team_in_queue is correct
+        flash(f'Error: Could not find **{team_id_to_start}** in the waiting queue.', 'error')
         
-        team_entry_for_timer = queue.pop(index_to_remove)
-        save_data(QUEUE_FILE, queue)
-    except StopIteration:
-        flash(f"Error: Could not find team {waiting_team['team_id']} in queue.", "error")
-        return redirect(url_for('index'))
-
-    CURRENT_RUN_TIME = get_current_run_time()
-
-    with active_lock:
-        run_slot.update({
-            'team_id': team_entry_for_timer['team_id'], 
-            'start_time': datetime.now().isoformat(),
-            'time_spent_sec': 0,
-            'status': 'RUNNING',
-            'assigned_run_time_sec': CURRENT_RUN_TIME # Assign current time to the slot
-        })
-    
-    start_run_timer(slot_id, CURRENT_RUN_TIME) 
-    flash(f"Run started for {team_entry_for_timer['team_id']} in Slot {slot_id}.", "success")
     return redirect(url_for('index'))
 
-
-@APP.route('/pause_run', methods=['POST'])
+@app.route('/pause_run', methods=['POST'])
 def pause_run():
-    """Pauses an active run and saves elapsed time."""
-    slot_id = request.form.get('slot_id')
+    slot_id = int(request.form['slot_id'])
+    run_data = active_runs.get(slot_id)
     
-    if not slot_id or slot_id not in active_runs:
-        return redirect(url_for('index'))
-
-    with active_lock:
-        run_slot = active_runs[slot_id]
-        if run_slot['status'] == 'RUNNING':
-            start = datetime.fromisoformat(run_slot['start_time'])
-            elapsed_current_segment = (datetime.now() - start).total_seconds()
-            
-            run_slot['time_spent_sec'] += elapsed_current_segment
-            
-            run_slot['status'] = 'PAUSED'
-            run_slot['start_time'] = None
-            
-            cancel_active_timer(slot_id)
-            
-            flash(f"Run paused for {run_slot['team_id']} in Slot {slot_id}.", "warning")
-    return redirect(url_for('index'))
-
-
-@APP.route('/resume_run', methods=['POST'])
-def resume_run():
-    """Resumes a paused or dysfunctional run."""
-    slot_id = request.form.get('slot_id')
-    
-    if not slot_id or slot_id not in active_runs:
-        return redirect(url_for('index'))
-
-    with active_lock:
-        run_slot = active_runs[slot_id]
-        if run_slot['team_id'] and (run_slot['status'] == 'PAUSED' or run_slot['status'] == 'DYSFUNCTIONAL'):
-            
-            # Use the time assigned to the slot when the run started
-            assigned_time = run_slot.get('assigned_run_time_sec', DEFAULT_RUN_TIME_SECONDS)
-            remaining_time = assigned_time - run_slot['time_spent_sec']
-            
-            if remaining_time > 0:
-                run_slot['status'] = 'RUNNING'
-                run_slot['start_time'] = datetime.now().isoformat()
-                
-                start_run_timer(slot_id, remaining_time) 
-                
-                flash(f"Run resumed for {run_slot['team_id']} in Slot {slot_id}.", "success")
-            else:
-                flash(f"Cannot resume run for {run_slot['team_id']}; time expired.", "error")
-    return redirect(url_for('index'))
-
-
-def move_run_to_review(slot_id, priority_rerun):
-    """
-    Helper function to process a run end (Dysfunctional or Ended) 
-    and move the team to the REVIEW queue.
-    """
-    global active_runs
-    
-    with active_lock:
-        run_slot = active_runs[slot_id]
-        if not run_slot['team_id']:
-            return "No team in slot."
-
-        team_id = run_slot['team_id']
-        
-        # 1. Update time spent and cancel timer if still running
-        if run_slot['status'] == 'RUNNING':
-            start = datetime.fromisoformat(run_slot['start_time'])
-            elapsed_current_segment = (datetime.now() - start).total_seconds()
-            run_slot['time_spent_sec'] += elapsed_current_segment
-            cancel_active_timer(slot_id)
-
-        # 2. Add team to the REVIEW queue
-        queue = load_data(QUEUE_FILE)
-        new_entry = {
-            'team_id': team_id,
-            'timestamp': datetime.now().isoformat(), 
-            'priority_re_run': priority_rerun, # True for dysfunctional, False for supervisor cancel
-            'status': 'REVIEW' # Send to review queue
-        }
-        queue.append(new_entry)
-        save_data(QUEUE_FILE, queue)
-
-        # 3. Reset the slot to IDLE
-        run_slot.update({
-            'team_id': None, 
-            'start_time': None, 
-            'time_spent_sec': 0, 
-            'timer_thread': None, 
-            'status': 'IDLE',
-            'assigned_run_time_sec': DEFAULT_RUN_TIME_SECONDS
+    if run_data and run_data['status'] == 'RUNNING':
+        # Calculate and store remaining time
+        time_rem = get_time_remaining(run_data)
+        run_data.update({
+            'status': 'PAUSED',
+            'time_paused_at': time.time(),
+            'time_remaining': time_rem
         })
-        return team_id
+        # Update the corresponding queue item
+        team_index = next((i for i, item in enumerate(queue) if item['team_id'] == run_data['team_id'] and item['status'] == 'RUNNING'), None)
+        if team_index is not None:
+            queue[team_index]['status'] = 'PAUSED'
+            flash(f'Team **{run_data["team_id"]}** run in Slot **{slot_id}** has been **PAUSED**.', 'warning')
+    else:
+        flash(f'Slot **{slot_id}** is not running.', 'error')
+    return redirect(url_for('index'))
 
-
-@APP.route('/mark_dysfunctional', methods=['POST'])
-def mark_dysfunctional():
-    """Marks a run as dysfunctional, moves the team to the REVIEW queue."""
-    slot_id = request.form.get('slot_id')
-    if not slot_id or slot_id not in active_runs:
-        return redirect(url_for('index'))
+@app.route('/resume_run', methods=['POST'])
+def resume_run():
+    slot_id = int(request.form['slot_id'])
+    run_data = active_runs.get(slot_id)
     
-    team_id = move_run_to_review(slot_id, priority_rerun=True)
-    if team_id:
-        flash(f"Run for **{team_id}** marked as DYSFUNCTIONAL and moved to the **Review Queue**.", "error")
+    if run_data and run_data['status'] in ('PAUSED', 'DYSFUNCTIONAL'):
+        time_rem = run_data['time_remaining']
+        run_data.update({
+            'start_time': time.time() - (RUN_TIME_SECONDS - time_rem), # Adjust start_time to reflect time already used
+            'status': 'RUNNING',
+            'time_paused_at': None,
+        })
+        # Update the corresponding queue item
+        team_index = next((i for i, item in enumerate(queue) if item['team_id'] == run_data['team_id']), None)
+        if team_index is not None:
+            queue[team_index]['status'] = 'RUNNING'
+            flash(f'Team **{run_data["team_id"]}** run in Slot **{slot_id}** has been **RESUMED**.', 'success')
+    else:
+        flash(f'Slot **{slot_id}** is not paused or dysfunctional.', 'error')
     return redirect(url_for('index'))
 
 
-@APP.route('/end_run', methods=['POST'])
-def end_run():
-    """Supervisor manually cancels a run, moves the team to the REVIEW queue."""
-    slot_id = request.form.get('slot_id')
-    if not slot_id or slot_id not in active_runs:
-        return redirect(url_for('index'))
+@app.route('/mark_dysfunctional', methods=['POST'])
+def mark_dysfunctional():
+    slot_id = int(request.form['slot_id'])
+    run_data = active_runs.get(slot_id)
+
+    if run_data and run_data['status'] == 'RUNNING':
+        # Calculate and store remaining time
+        time_rem = get_time_remaining(run_data)
+        team_id = run_data['team_id']
         
-    team_id = move_run_to_review(slot_id, priority_rerun=False)
-    if team_id:
-        flash(f"Run for **{team_id}** CANCELED by supervisor and moved to the **Review Queue**.", "warning")
+        # 1. Update the active run slot status
+        run_data.update({
+            'status': 'DYSFUNCTIONAL',
+            'time_paused_at': time.time(),
+            'time_remaining': time_rem
+        })
+        
+        # 2. Update the queue item: status to PAUSED, and set priority_re_run flag
+        team_index = next((i for i, item in enumerate(queue) if item['team_id'] == team_id and item['status'] == 'RUNNING'), None)
+        if team_index is not None:
+            queue[team_index]['status'] = 'PAUSED' # Keep it PAUSED until review/resume
+            queue[team_index]['priority_re_run'] = True # Set the priority flag
+            flash(f'Team **{team_id}** run in Slot **{slot_id}** marked as **DYSFUNCTIONAL**. It can be resumed or sent to review.', 'warning')
+    else:
+        flash(f'Slot **{slot_id}** is not running.', 'error')
+        
     return redirect(url_for('index'))
 
+@app.route('/end_run', methods=['POST'])
+def end_run():
+    slot_id = int(request.form['slot_id'])
+    run_data = active_runs.get(slot_id)
+    
+    if run_data and run_data['team_id']:
+        team_id = run_data['team_id']
+        
+        # 1. Update the team's status in the queue to REVIEW
+        team_index = next((i for i, item in enumerate(queue) if item['team_id'] == team_id and item['status'] in ('RUNNING', 'PAUSED')), None)
+        if team_index is not None:
+            queue[team_index]['status'] = 'REVIEW'
+            # If it was dysfunctional, the priority_re_run flag remains true for the review stage
+            flash(f'Team **{team_id}** run in Slot **{slot_id}** ended and moved to **Review Queue**.', 'success')
+            
+        # 2. Clear the active slot
+        active_runs[slot_id] = {'team_id': None, 'start_time': None, 'status': 'IDLE', 'time_paused_at': None, 'time_remaining': None}
+    else:
+        flash(f'Slot **{slot_id}** has no active run to end.', 'error')
+        
+    return redirect(url_for('index'))
 
 # --- Review Queue Actions ---
 
-@APP.route('/mark_success', methods=['POST'])
+def handle_review_action(team_id, action_status, clear_flag):
+    """Handles logic for marking runs as SUCCESS, FAILURE, or CANCELED."""
+    team_index = next((i for i, item in enumerate(queue) if item['team_id'] == team_id and item['status'] == 'REVIEW'), None)
+    
+    if team_index is None:
+        flash(f'Team **{team_id}** not found in the review queue.', 'error')
+        return redirect(url_for('index'))
+        
+    if action_status == 'SUCCESS':
+        # Increment run count
+        teams_history[team_id] = teams_history.get(team_id, 0) + 1
+        # Remove from queue
+        queue.pop(team_index)
+        flash(f'Team **{team_id}** run marked as **SUCCESSFUL**. Run count incremented.', 'success')
+        
+    elif action_status == 'FAILURE':
+        # Technical Failure means we don't count the run and re-add them to the queue with priority
+        queue[team_index]['status'] = 'WAITING'
+        queue[team_index]['priority_re_run'] = True # Ensure they get highest WAITING priority
+        flash(f'Team **{team_id}** run marked as **TECHNICAL FAILURE**. Re-added to waiting queue with **PRIORITY**.', 'warning')
+        
+    elif action_status == 'CANCELED':
+        # Remove from queue (no count increment)
+        queue.pop(team_index)
+        flash(f'Team **{team_id}** run marked as **CANCELED**. Run count not affected.', 'error')
+        
+    return redirect(url_for('index'))
+
+@app.route('/mark_success', methods=['POST'])
 def mark_success():
-    """Marks the current review team as successful, increments run count, and removes from queue."""
-    queue = load_data(QUEUE_FILE)
-    review_team_index = next((i for i, team in enumerate(queue) if team.get('status') == 'REVIEW'), -1)
+    team_id = request.form['team_id']
+    return handle_review_action(team_id, 'SUCCESS', True)
 
-    if review_team_index == -1:
-        flash("No team in review state to mark as successful.", "error")
-        return redirect(url_for('index'))
-
-    review_team = queue.pop(review_team_index)
-    save_data(QUEUE_FILE, queue)
-
-    history = load_data(RUNS_FILE)
-    team_id = review_team['team_id']
-    history[team_id] = history.get(team_id, 0) + 1 
-    save_data(RUNS_FILE, history)
-    
-    flash(f"Team {team_id} successfully completed run. Total runs: {history[team_id]}.", "success")
-    return redirect(url_for('index'))
-
-
-@APP.route('/mark_failure', methods=['POST'])
+@app.route('/mark_failure', methods=['POST'])
 def mark_failure():
-    """Marks the current review team as a failure, giving them priority for a re-run."""
-    queue = load_data(QUEUE_FILE)
-    review_team_index = next((i for i, team in enumerate(queue) if team.get('status') == 'REVIEW'), -1)
+    team_id = request.form['team_id']
+    # FAILURE means re-add to WAITING with priority_re_run = True
+    return handle_review_action(team_id, 'FAILURE', False)
 
-    if review_team_index == -1:
-        flash("No team in review state to mark as failure.", "error")
-        return redirect(url_for('index'))
-
-    team = queue.pop(review_team_index) # Remove from review
-    
-    # Re-add as a waiting team with priority
-    new_entry = {
-        'team_id': team['team_id'],
-        'timestamp': datetime.now().isoformat(), 
-        'priority_re_run': True,
-        'status': 'WAITING'
-    }
-    queue.append(new_entry)
-    save_data(QUEUE_FILE, queue)
-    
-    flash(f"Team {team['team_id']} marked as FAILURE and placed in queue for **priority re-run**.", "warning")
-    return redirect(url_for('index'))
-
-
-@APP.route('/mark_canceled', methods=['POST'])
+@app.route('/mark_canceled', methods=['POST'])
 def mark_canceled():
-    """NEW: Marks the current review team as canceled, removes from queue, and does NOT increment run count."""
-    queue = load_data(QUEUE_FILE)
-    review_team_index = next((i for i, team in enumerate(queue) if team.get('status') == 'REVIEW'), -1)
+    team_id = request.form['team_id']
+    return handle_review_action(team_id, 'CANCELED', True)
 
-    if review_team_index == -1:
-        flash("No team in review state to mark as canceled.", "error")
-        return redirect(url_for('index'))
+# --- Settings ---
 
-    review_team = queue.pop(review_team_index)
-    save_data(QUEUE_FILE, queue)
-    
-    # NOTE: Run count is NOT incremented.
-    flash(f"Team {review_team['team_id']} fully **CANCELED** from the system. Run count not affected.", "error")
+@app.route('/set_run_time', methods=['POST'])
+def set_run_time():
+    global RUN_TIME_SECONDS
+    try:
+        minutes = int(request.form['run_time_minutes'])
+        if minutes <= 0:
+            raise ValueError
+        RUN_TIME_SECONDS = minutes * 60
+        flash(f'Run time updated to **{minutes} minutes**.', 'success')
+    except ValueError:
+        flash('Invalid run time. Must be a positive integer.', 'error')
     return redirect(url_for('index'))
-
-
-# --- 8. Run the Application ---
 
 if __name__ == '__main__':
-    # Cleanup: Ensure all REVIEW teams are returned to WAITING on startup
-    queue = load_data(QUEUE_FILE)
-    changes_made = False
-    for team in queue:
-        # If the server was shut down with a team in REVIEW, send it back to waiting without priority
-        if team.get('status') == 'REVIEW' or 'status' not in team:
-            team['status'] = 'WAITING'
-            team['priority_re_run'] = False # Clear priority if it was a review
-            changes_made = True
-            
-        if 'priority_re_run' not in team:
-            team['priority_re_run'] = False
-            changes_made = True
+    # Initial seed data for testing the new sorting
+    # TEST CASE SCENARIO:
+    # TEAM_D (0 runs) should be #1.
+    # TEAM_B (1 run, PRIORITY) should be #2.
+    # TEAM_E (0 runs, but joins after D) is also 0 runs, so will be behind D by FIFO, but still Tier 1.
+    # TEAM_C (2 runs, No Priority) should be #4.
+    # TEAM_A (3 runs, No Priority) should be #5.
+    
+    if not teams_history:
+        teams_history = {'TEAM_A': 3, 'TEAM_B': 1, 'TEAM_C': 2, 'TEAM_D': 0}
+        
+    if not queue:
+        queue.append({'team_id': 'TEAM_A', 'status': 'WAITING', 'priority_re_run': False, 'time_added': time.time() - 4}) # 3 runs, Joins earliest
+        queue.append({'team_id': 'TEAM_C', 'status': 'WAITING', 'priority_re_run': False, 'time_added': time.time() - 3}) # 2 runs
+        queue.append({'team_id': 'TEAM_B', 'status': 'WAITING', 'priority_re_run': True, 'time_added': time.time() - 2}) # 1 run, PRIORITY
+        queue.append({'team_id': 'TEAM_D', 'status': 'WAITING', 'priority_re_run': False, 'time_added': time.time() - 1}) # 0 runs, Joins later
+        queue.append({'team_id': 'TEAM_E', 'status': 'WAITING', 'priority_re_run': False, 'time_added': time.time()}) # 0 runs, Joins last
+        
+        # Expected order: D, E, B, C, A
 
-    if changes_made:
-        save_data(QUEUE_FILE, queue)
-
-    # Initialize run_time in the session if not present (using config value)
-    with APP.test_request_context('/'):
-        if 'run_time' not in session:
-            session['run_time'] = APP_CONFIG['run_time']
-
-    # Start the application
-    APP.run(debug=True, host='0.0.0.0', port=5000)
+    app.run(debug=True)

@@ -1,1 +1,8 @@
-[]
+[
+  {
+    "team_id": "team 1",
+    "timestamp": "2025-12-08T16:50:45.922814",
+    "priority_re_run": false,
+    "status": "WAITING"
+  }
+]
