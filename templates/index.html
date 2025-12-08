@@ -4,9 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Robotics Run Queue</title>
-    <!-- Load Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Load timer script -->
     <script src="{{ url_for('static', filename='timer.js') }}"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
     <style>
@@ -28,20 +26,17 @@
             <p class="text-gray-500 mt-2">Manage team runs and status for the robotics arena.</p>
         </header>
 
-        <!-- --- ACTIVE RUN PANEL --- -->
         <div class="mb-8 card bg-white p-6 border-t-4 border-indigo-500">
             <h2 class="text-2xl font-bold mb-4 text-indigo-600">Active Run Status</h2>
             
             {% if active_run.team_id %}
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-6 items-center">
-                    <!-- Team Info -->
                     <div>
                         <p class="text-lg font-semibold text-gray-700">Team Running:</p>
                         <p class="text-3xl font-extrabold text-indigo-800">{{ active_run.team_id }}</p>
                     </div>
 
-                    <!-- Timer/Status -->
-                <div class="text-center">
+                    <div class="text-center">
                         <p class="text-lg font-semibold text-gray-700">Time Remaining:</p>
                         <p id="active-run-timer-display" 
                         class="text-5xl font-extrabold 
@@ -58,9 +53,7 @@
                         {% endif %}
                     </div>
                     
-                    <!-- Supervisor Controls -->
                     <div class="flex flex-col space-y-2">
-                        <!-- Controls for RUNNING status -->
                         {% if active_run.status == 'RUNNING' %}
                             <form action="{{ url_for('pause_run') }}" method="post" class="w-full">
                                 <button type="submit" class="w-full bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-2 px-4 rounded transition duration-150">
@@ -73,7 +66,6 @@
                                 </button>
                             </form>
                         
-                        <!-- Controls for PAUSED/DYSFUNCTIONAL status -->
                         {% elif active_run.status == 'PAUSED' or active_run.status == 'DYSFUNCTIONAL' %}
                             <form action="{{ url_for('resume_run') }}" method="post" class="w-full">
                                 <button type="submit" class="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded transition duration-150">
@@ -82,7 +74,6 @@
                             </form>
                         {% endif %}
 
-                        <!-- Always available when a run is active (for mistakes/cancellation) -->
                         {% if active_run.status != 'IDLE' %}
                             <form action="{{ url_for('end_run') }}" method="post" class="w-full" onsubmit="return confirmAction('END RUN', 'Are you sure you want to CANCEL this run? The team will need to re-join the queue.')">
                                 <button type="submit" class="w-full bg-gray-400 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded transition duration-150">
@@ -93,12 +84,10 @@
                     </div>
                 </div>
             {% else %}
-                <!-- IDLE State: Show the Start Button -->
                 <div class="text-center p-8">
                     <p class="text-xl text-gray-500 mb-4">The arena is currently idle. Ready to start the next run.</p>
                     
                     {% if queue|length > 0 and (review_team is none) %}
-                        <!-- Start Run for WAITING Team -->
                         {% set next_waiting_team = queue | selectattr('status', 'equalto', 'WAITING') | first %}
                         {% if next_waiting_team %}
                             <form action="{{ url_for('start_run') }}" method="post" onsubmit="return confirmAction('START RUN', 'Start the run for Team {{ next_waiting_team.team_id }}? (This will consume their queue slot)')">
@@ -117,10 +106,8 @@
             {% endif %}
         </div>
 
-        <!-- --- QUEUE & HISTORY --- -->
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
             
-            <!-- 1. Review Queue (Highest Priority) -->
             <div class="lg:col-span-1 card bg-red-50 p-6 border-l-4 border-red-500">
                 <h2 class="text-xl font-bold mb-4 text-red-600">Review Queue <span class="text-sm font-normal">({{ queue|selectattr('status', 'equalto', 'REVIEW')|list|length }})</span></h2>
                 
@@ -155,7 +142,6 @@
                 {% endif %}
             </div>
 
-            <!-- 2. Waiting Queue -->
             <div class="lg:col-span-2 card bg-white p-6 border-l-4 border-indigo-500">
                 <h2 class="text-xl font-bold mb-4 text-indigo-600">Waiting Queue <span class="text-sm font-normal">({{ queue|selectattr('status', 'equalto', 'WAITING')|list|length }})</span></h2>
                 
@@ -186,8 +172,25 @@
                 {% endif %}
             </div>
             
-            <!-- 3. Join Form -->
-            <div class="lg:col-span-3 card bg-gray-100 p-6 mt-8 border-t border-gray-300">
+            <div class="lg:col-span-3 card bg-gray-100 p-6 border-t border-gray-300">
+                <h2 class="text-xl font-bold mb-4 text-gray-700">⚙️ Supervisor Settings</h2>
+                
+                <div class="mb-6">
+                    <h3 class="text-lg font-semibold mb-2 text-gray-600">Set Max Run Time</h3>
+                    <form action="{{ url_for('set_run_time') }}" method="post" class="flex space-x-4 items-center">
+                        {% set current_minutes = (RUN_TIME_SECONDS / 60) | int %}
+                        <input type="number" name="run_time_minutes" value="{{ current_minutes }}" min="1" required 
+                               class="w-20 p-3 border border-gray-300 rounded-lg text-center focus:ring-indigo-500 focus:border-indigo-500" />
+                        <span class="text-gray-600">minutes</span>
+                        <button type="submit" class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-3 px-6 rounded-lg transition duration-150 shadow-md">
+                            Save Run Time
+                        </button>
+                        <p class="text-sm text-gray-500">**Current Active Time:** <span class="font-bold">{{ current_minutes }} minutes</span></p>
+                    </form>
+                </div>
+            </div>
+
+            <div class="lg:col-span-3 card bg-gray-100 p-6 border-t border-gray-300">
                 <h2 class="text-xl font-bold mb-4 text-gray-700">Join the Queue</h2>
                 <form action="{{ url_for('join_queue') }}" method="post" class="flex flex-col sm:flex-row space-y-3 sm:space-y-0 sm:space-x-4">
                     <input type="text" name="team_id" placeholder="Enter Team ID (e.g., T-101)" required 
@@ -200,7 +203,6 @@
         </div>
     </div>
 
-    <!-- JavaScript for custom confirmation dialogues -->
     <script>
         // NOTE: We are using window.confirm() as a temporary measure per instructions. 
         // In a real environment, this would be a custom modal to avoid browser blocking.

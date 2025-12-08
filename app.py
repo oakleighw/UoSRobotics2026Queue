@@ -3,14 +3,15 @@ import os
 import threading
 import time
 from datetime import datetime, timedelta
-from flask import Flask, request, render_template, redirect, url_for
+from flask import Flask, request, render_template, redirect, url_for, session
 
 # --- Configuration ---
 QUEUE_FILE = 'queue_data.json'
 RUNS_FILE = 'runs_tracker.json'
 
 # Run time in seconds (e.g., 5 minutes for testing)
-RUN_TIME_SECONDS = 300 
+# We will now use this as the default/fallback value
+DEFAULT_RUN_TIME_SECONDS = 300 
 
 # --- 1. Global State Management (Protected by a Lock) ---
 # Status: IDLE, RUNNING, PAUSED, DYSFUNCTIONAL
@@ -23,9 +24,12 @@ active_run = {
 }
 active_lock = threading.Lock() 
 
-
 # --- 2. Flask Initialization ---
 APP = Flask(__name__) 
+
+# CRITICAL: Set a secret key for session management
+# **IMPORTANT**: Use a complex, random string in production!
+APP.secret_key = 'your_super_secret_key_here'
 
 
 # --- 3. JSON Helper Functions ---
@@ -51,6 +55,26 @@ def save_data(filename, data):
 
 
 # --- 4. Core Timer Logic ---
+
+@APP.route('/set_run_time', methods=['POST'])
+def set_run_time():
+    """Supervisor action: Sets the desired run time in the user's session."""
+    
+    # Run time is expected in minutes from the form input
+    run_time_minutes = request.form.get('run_time_minutes', '5')
+    
+    try:
+        minutes = int(run_time_minutes)
+        if minutes > 0:
+            # Store the run time in seconds in the session
+            session['run_time'] = minutes * 60
+            print(f"Run time set to {minutes} minutes ({session['run_time']} seconds).")
+        else:
+            print("Invalid run time entered. Must be greater than 0.")
+    except ValueError:
+        print("Invalid input for run time.")
+        
+    return redirect(url_for('index'))
 
 def cancel_active_timer():
     """Helper to safely cancel the currently running timer thread."""
@@ -103,6 +127,12 @@ def start_run_timer(remaining_time_sec):
     active_run['timer_thread'] = timer_thread
     print(f"Timer started for {active_run['team_id']} for {remaining_time_sec:.2f} seconds.")
 
+def get_current_run_time():
+    """Retrieves the run time from the session, falling back to the default."""
+
+    # Use session.get(). The 'run_time' key stores the duration in seconds.
+    return session.get('run_time', DEFAULT_RUN_TIME_SECONDS)
+
 
 # --- 5. Core Sorting Logic ---
 
@@ -144,6 +174,9 @@ def get_sorted_queue():
 def index():
     """Renders the main queue page, calculating time remaining for the active run."""
     
+    # 1. Get the current session run time here
+    CURRENT_RUN_TIME = get_current_run_time()
+    
     time_remaining = None
     
     with active_lock:
@@ -153,7 +186,7 @@ def index():
         start_time_iso = active_run['start_time']
         
         # Default remaining time is the full time
-        time_remaining_sec = RUN_TIME_SECONDS - time_spent_sec
+        time_remaining_sec = CURRENT_RUN_TIME - time_spent_sec
 
         if team_id:
             if status == 'RUNNING':
@@ -165,7 +198,7 @@ def index():
                 total_time_spent = time_spent_sec + elapsed_current_segment
                 
                 # 3. Remaining time based on total time run
-                time_remaining_sec = RUN_TIME_SECONDS - total_time_spent
+                time_remaining_sec = CURRENT_RUN_TIME - total_time_spent
                 
                 if time_remaining_sec > 0:
                     minutes = int(time_remaining_sec // 60)
@@ -196,7 +229,7 @@ def index():
                            time_remaining=time_remaining,
                            time_remaining_sec=time_remaining_sec,
                            review_team=review_team,
-                           RUN_TIME_SECONDS=RUN_TIME_SECONDS) 
+                           RUN_TIME_SECONDS=CURRENT_RUN_TIME) 
 
 @APP.route('/join', methods=['POST'])
 def join_queue():
@@ -275,6 +308,9 @@ def start_run():
         print(f"Error: Could not find team {waiting_team['team_id']} in queue to start run.")
         return redirect(url_for('index'))
 
+    # Get the current run time before starting
+    CURRENT_RUN_TIME = get_current_run_time()
+
     # 3. Assign team to the active slot and start timer
     with active_lock:
         active_run.update({
@@ -285,7 +321,7 @@ def start_run():
         })
     
     # Start timer for the full run time
-    start_run_timer(RUN_TIME_SECONDS) 
+    start_run_timer(CURRENT_RUN_TIME) 
     print(f"Run started for {team_entry_for_timer['team_id']}")
     return redirect(url_for('index'))
 
@@ -316,9 +352,12 @@ def pause_run():
 @APP.route('/resume_run', methods=['POST'])
 def resume_run():
     """Supervisor action: Resumes a paused or dysfunctional run."""
+
+    CURRENT_RUN_TIME = get_current_run_time()
+
     with active_lock:
         if active_run['team_id'] and (active_run['status'] == 'PAUSED' or active_run['status'] == 'DYSFUNCTIONAL'):
-            remaining_time = RUN_TIME_SECONDS - active_run['time_spent_sec']
+            remaining_time = CURRENT_RUN_TIME - active_run['time_spent_sec']
             
             if remaining_time > 0:
                 # 1. Update status and set new start time
