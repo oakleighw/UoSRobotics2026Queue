@@ -80,7 +80,8 @@
                                     </form>
                                     <form method="POST" action="{{ url_for('mark_dysfunctional') }}" class="w-full">
                                         <input type="hidden" name="slot_id" value="{{ slot_id }}">
-                                        <button type="submit" class="w-full bg-red-500 hover:bg-red-600 text-white font-bold py-2 rounded transition duration-150">⚠️ Dysfunctional</button>
+                                        <button type="submit" class="w-full bg-red-500 hover:bg-red-600 text-white font-bold py-2 rounded transition duration-150" 
+                                            onclick="return confirmAction('DYSFUNCTIONAL', 'Are you sure you want to mark this run as DYSFUNCTIONAL and send to review?')">⚠️ Dysfunctional</button>
                                     </form>
                                 {% elif data.slot_data.status == 'PAUSED' or data.slot_data.status == 'DYSFUNCTIONAL' %}
                                     <form method="POST" action="{{ url_for('resume_run') }}" class="w-full">
@@ -90,7 +91,8 @@
                                 {% endif %}
                                 
                                 {% if data.slot_data.status != 'IDLE' %}
-                                    <form method="POST" action="{{ url_for('end_run') }}" class="w-full" onsubmit="return confirmAction('END RUN', 'Are you sure you want to CANCEL the run in Slot {{ slot_id }}?')">
+                                    <form method="POST" action="{{ url_for('end_run') }}" class="w-full" 
+                                        onsubmit="return confirmAction('END RUN', 'Are you sure you want to CANCEL this run and send to review?')">
                                         <input type="hidden" name="slot_id" value="{{ slot_id }}">
                                         <button type="submit" class="w-full bg-gray-400 hover:bg-gray-500 text-white font-bold py-2 rounded transition duration-150">❌ End Run</button>
                                     </form>
@@ -116,8 +118,56 @@
                         {% endif %}
                     </div>
                 {% endfor %}
-            </div>
+                
+                <div class="card bg-purple-50 p-6 border-l-4 border-purple-500 lg:col-span-1">
+                    <h2 class="text-xl font-bold mb-4 text-purple-700">➕ Join Queue</h2>
+                    <form action="{{ url_for('join_queue') }}" method="post" class="space-y-4">
+                        <input type="text" name="team_id" placeholder="Enter Team ID (e.g., TEAM_A)" required 
+                            class="w-full p-3 border border-purple-300 rounded-lg focus:ring-purple-500 focus:border-purple-500" />
+                        <button type="submit" class="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 rounded-lg transition duration-150 shadow-md">
+                            Add Team to Waitlist
+                        </button>
+                    </form>
+                </div>
+                </div>
         </section>
+
+        <hr class="my-8">
+        
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-8">
+            
+            <div class="lg:col-span-1 card bg-gray-100 p-6 border-t border-gray-300">
+                <h2 class="text-xl font-bold mb-4 text-gray-700">⚙️ Settings</h2>
+                <form action="{{ url_for('set_run_time') }}" method="post" class="flex flex-col space-y-3">
+                    {% set current_minutes = (RUN_TIME_SECONDS / 60) | int %}
+                    <div class="flex items-center space-x-2">
+                        <input type="number" name="run_time_minutes" value="{{ current_minutes }}" min="1" required 
+                            class="w-20 p-3 border border-gray-300 rounded-lg text-center focus:ring-indigo-500 focus:border-indigo-500" />
+                        <span class="text-gray-600">minutes</span>
+                    </div>
+                    <button type="submit" class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-3 px-6 rounded-lg transition duration-150 shadow-md">
+                        Save Run Time
+                    </button>
+                    <p class="text-sm text-gray-500">**Current Active Time:** <span class="font-bold">{{ current_minutes }} minutes</span></p>
+                </form>
+            </div>
+
+            <div class="lg:col-span-2 card bg-blue-50 p-6 border-l-4 border-blue-500">
+                <h2 class="text-xl font-bold mb-4 text-blue-700">🏆 Team Runs Tally</h2>
+                <div class="h-40 overflow-y-auto space-y-1">
+                    {% if teams_history %}
+                        {% for team_id, count in teams_history.items()|sort(attribute='1', reverse=true) %}
+                            <div class="flex justify-between items-center p-2 bg-white rounded-lg shadow-sm border border-blue-100">
+                                <span class="font-semibold text-gray-800">{{ team_id }}</span>
+                                <span class="text-xl font-extrabold text-blue-600">{{ count }}</span>
+                            </div>
+                        {% endfor %}
+                    {% else %}
+                        <p class="text-gray-400 italic">No runs recorded yet.</p>
+                    {% endif %}
+                </div>
+            </div>
+            </div>
 
         <hr class="my-8">
 
@@ -135,6 +185,7 @@
                                 <p class="font-semibold text-red-800 text-lg">{{ team.team_id }}</p>
                                 <p class="text-sm text-gray-500">
                                     Status: <span class="font-bold text-red-600">READY FOR REVIEW</span>
+                                    {% if team.priority_re_run %}<span class="text-red-500 ml-2">(Dysfunctional - Priority Re-run Recommended)</span>{% endif %}
                                 </p>
                                 
                                 <div class="mt-2 flex space-x-2">
@@ -143,9 +194,14 @@
                                             SUCCESS
                                         </button>
                                     </form>
-                                    <form action="{{ url_for('mark_failure') }}" method="post" class="flex-1" onsubmit="return confirmAction('FAILURE', 'Mark Team {{ team.team_id }} as TECHNICAL FAILURE?')">
+                                    <form action="{{ url_for('mark_failure') }}" method="post" class="flex-1" onsubmit="return confirmAction('FAILURE', 'Mark Team {{ team.team_id }} as TECHNICAL FAILURE (Priority Re-run)?')">
                                         <button type="submit" class="w-full text-xs bg-yellow-500 hover:bg-yellow-600 text-white py-1 rounded">
                                             FAILURE
+                                        </button>
+                                    </form>
+                                    <form action="{{ url_for('mark_canceled') }}" method="post" class="flex-1" onsubmit="return confirmAction('CANCELED', 'Mark Team {{ team.team_id }} as CANCELED (Remove from system, no run count)?')">
+                                        <button type="submit" class="w-full text-xs bg-gray-500 hover:bg-gray-600 text-white py-1 rounded">
+                                            CANCELED
                                         </button>
                                     </form>
                                 </div>
@@ -186,98 +242,46 @@
                     <p class="text-gray-400 italic">The waiting queue is empty!</p>
                 {% endif %}
             </div>
-
-            <div class="lg:col-span-3 grid grid-cols-1 sm:grid-cols-2 gap-6">
-                
-                <div class="card bg-gray-100 p-6 border-t border-gray-300 sm:col-span-2">
-                    <h2 class="text-xl font-bold mb-4 text-gray-700">⚙️ Set Max Run Time</h2>
-                    <form action="{{ url_for('set_run_time') }}" method="post" class="flex space-x-4 items-center">
-                        {% set current_minutes = (RUN_TIME_SECONDS / 60) | int %}
-                        <input type="number" name="run_time_minutes" value="{{ current_minutes }}" min="1" required 
-                            class="w-20 p-3 border border-gray-300 rounded-lg text-center focus:ring-indigo-500 focus:border-indigo-500" />
-                        <span class="text-gray-600">minutes</span>
-                        <button type="submit" class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-3 px-6 rounded-lg transition duration-150 shadow-md">
-                            Save Run Time
-                        </button>
-                        <p class="text-sm text-gray-500 ml-4">**Current Active Time:** <span class="font-bold">{{ current_minutes }} minutes</span></p>
-                    </form>
-                </div>
-                
-                <div class="card bg-gray-100 p-6 border-t border-gray-300 lg:col-span-2">
-                    <h2 class="text-xl font-bold mb-4 text-gray-700">Join the Queue</h2>
-                    <form action="{{ url_for('join_queue') }}" method="post" class="flex flex-col sm:flex-row space-y-3 sm:space-y-0 sm:space-x-4">
-                        <input type="text" name="team_id" placeholder="Enter Team ID (e.g., T-101)" required 
-                                class="flex-1 p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500" />
-                        <button type="submit" class="bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-3 px-6 rounded-lg transition duration-150 shadow-md">
-                            Join Queue
-                        </button>
-                    </form>
-                </div>
-            </div>
+            
         </div>
+
     </div>
 
     <script>
+        // Confirmation function for actions
         function confirmAction(action, message) {
-            console.log(`Confirming action: ${action}`);
-            return window.confirm(message);
+            return confirm(message);
         }
 
+        // Timer Logic (Keep your existing timer logic here)
         function formatTime(seconds) {
-            if (seconds < 0) return "00:00";
             const minutes = Math.floor(seconds / 60);
             const remainingSeconds = Math.floor(seconds % 60);
-            return `${String(minutes).padStart(2, '0')}:${String(remainingSeconds).padStart(2, '0')}`;
+            return `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
         }
 
-        let timers = {};
-        
-        function initializeMultiCountdown() {
-            let hasRunningTimers = false;
-            
-            document.querySelectorAll('[id^="timer-"]').forEach(timerElement => {
-                const slotId = timerElement.id.replace('timer-', '');
+        function updateTimers() {
+            document.querySelectorAll('[data-seconds-remaining]').forEach(timerElement => {
+                let seconds = parseInt(timerElement.getAttribute('data-seconds-remaining'));
                 const status = timerElement.getAttribute('data-status');
-                let seconds = parseInt(timerElement.getAttribute('data-seconds-remaining') || '0', 10);
                 
-                if (status === "RUNNING" && seconds > 0) {
-                    timers[slotId] = seconds;
-                    hasRunningTimers = true;
-                } else if (seconds > 0) {
-                    timerElement.textContent = formatTime(seconds);
+                if (status === 'RUNNING' && seconds > 0) {
+                    seconds--;
+                    timerElement.setAttribute('data-seconds-remaining', seconds);
+                    timerElement.innerHTML = `**${formatTime(seconds)}**`;
+                } else if (seconds <= 0) {
+                    timerElement.innerHTML = `**00:00**`;
+                    if (status === 'RUNNING') {
+                        // Optional: Reload the page when a run times out to refresh the queue/review status
+                        // window.location.reload(); 
+                    }
                 }
             });
-
-            if (hasRunningTimers) {
-                updateTimers(); 
-                setInterval(updateTimers, 1000);
-            }
-        }
-        
-        function updateTimers() {
-            let needsRefresh = false;
-
-            for (const slotId in timers) {
-                timers[slotId] -= 1; 
-                const displayElement = document.getElementById(`timer-${slotId}`);
-                
-                if (displayElement) {
-                    displayElement.textContent = formatTime(timers[slotId]);
-                }
-
-                if (timers[slotId] <= 0) {
-                    needsRefresh = true;
-                    delete timers[slotId];
-                }
-            }
-            
-            if (needsRefresh) {
-                // Reload the page to capture the server-side state change (slot becoming IDLE)
-                setTimeout(() => location.reload(), 500); 
-            }
         }
 
-        document.addEventListener('DOMContentLoaded', initializeMultiCountdown);
+        // Update timers every second
+        setInterval(updateTimers, 1000);
     </script>
+
 </body>
 </html>

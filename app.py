@@ -263,8 +263,9 @@ def join_queue():
 
     queue = load_data(QUEUE_FILE)
     
-    if any(entry['team_id'] == team_id for entry in queue):
-        flash(f"Team {team_id} is already in the queue or in review.", "error")
+    # Check if team is in queue, active, or review (REVIEW teams are already in queue)
+    if any(entry['team_id'] == team_id for entry in queue if entry['status'] != 'REVIEW'): 
+        flash(f"Team {team_id} is already in the waiting queue or in review.", "error")
         return redirect(url_for('index'))
 
     with active_lock:
@@ -311,7 +312,8 @@ def start_run():
             return redirect(url_for('index'))
 
     sorted_queue = get_sorted_queue()
-    waiting_team = next((team for team in sorted_queue if team.get('status') == 'WAITING'), None)
+    # Only pull WAITING teams for a new start
+    waiting_team = next((team for team in sorted_queue if team.get('status') == 'WAITING'), None) 
     
     if not waiting_team:
         flash("No teams in WAITING state to start a run.", "warning")
@@ -320,6 +322,7 @@ def start_run():
     queue = load_data(QUEUE_FILE)
     
     try:
+        # Find the specific entry in the unsorted queue to pop
         index_to_remove = next(i for i, entry in enumerate(queue) 
                                if entry['team_id'] == waiting_team['team_id'] and entry['timestamp'] == waiting_team['timestamp'])
         
@@ -398,55 +401,77 @@ def resume_run():
     return redirect(url_for('index'))
 
 
-@APP.route('/mark_dysfunctional', methods=['POST'])
-def mark_dysfunctional():
-    """Marks a run as dysfunctional, pausing the timer and saving elapsed time."""
-    slot_id = request.form.get('slot_id')
+def move_run_to_review(slot_id, priority_rerun):
+    """
+    Helper function to process a run end (Dysfunctional or Ended) 
+    and move the team to the REVIEW queue.
+    """
+    global active_runs
     
-    if not slot_id or slot_id not in active_runs:
-        return redirect(url_for('index'))
-
     with active_lock:
         run_slot = active_runs[slot_id]
+        if not run_slot['team_id']:
+            return "No team in slot."
+
+        team_id = run_slot['team_id']
+        
+        # 1. Update time spent and cancel timer if still running
         if run_slot['status'] == 'RUNNING':
             start = datetime.fromisoformat(run_slot['start_time'])
             elapsed_current_segment = (datetime.now() - start).total_seconds()
             run_slot['time_spent_sec'] += elapsed_current_segment
             cancel_active_timer(slot_id)
-            
-        if run_slot['team_id']: 
-            run_slot['status'] = 'DYSFUNCTIONAL'
-            run_slot['start_time'] = None
-            flash(f"Run for {run_slot['team_id']} in Slot {slot_id} marked as DYSFUNCTIONAL.", "error")
+
+        # 2. Add team to the REVIEW queue
+        queue = load_data(QUEUE_FILE)
+        new_entry = {
+            'team_id': team_id,
+            'timestamp': datetime.now().isoformat(), 
+            'priority_re_run': priority_rerun, # True for dysfunctional, False for supervisor cancel
+            'status': 'REVIEW' # Send to review queue
+        }
+        queue.append(new_entry)
+        save_data(QUEUE_FILE, queue)
+
+        # 3. Reset the slot to IDLE
+        run_slot.update({
+            'team_id': None, 
+            'start_time': None, 
+            'time_spent_sec': 0, 
+            'timer_thread': None, 
+            'status': 'IDLE',
+            'assigned_run_time_sec': DEFAULT_RUN_TIME_SECONDS
+        })
+        return team_id
+
+
+@APP.route('/mark_dysfunctional', methods=['POST'])
+def mark_dysfunctional():
+    """Marks a run as dysfunctional, moves the team to the REVIEW queue."""
+    slot_id = request.form.get('slot_id')
+    if not slot_id or slot_id not in active_runs:
+        return redirect(url_for('index'))
+    
+    team_id = move_run_to_review(slot_id, priority_rerun=True)
+    if team_id:
+        flash(f"Run for **{team_id}** marked as DYSFUNCTIONAL and moved to the **Review Queue**.", "error")
     return redirect(url_for('index'))
 
 
 @APP.route('/end_run', methods=['POST'])
 def end_run():
-    """Completely cancels a run, resetting the slot to IDLE."""
+    """Supervisor manually cancels a run, moves the team to the REVIEW queue."""
     slot_id = request.form.get('slot_id')
-    
     if not slot_id or slot_id not in active_runs:
         return redirect(url_for('index'))
         
-    with active_lock:
-        run_slot = active_runs[slot_id]
-        if run_slot['team_id'] is not None:
-            team_id = run_slot['team_id']
-            cancel_active_timer(slot_id)
-            
-            run_slot.update({
-                'team_id': None, 
-                'start_time': None, 
-                'time_spent_sec': 0, 
-                'timer_thread': None, 
-                'status': 'IDLE',
-                'assigned_run_time_sec': DEFAULT_RUN_TIME_SECONDS # Reset time field
-            })
-            flash(f"Run for {team_id} in Slot {slot_id} completely CANCELED.", "warning")
-            
+    team_id = move_run_to_review(slot_id, priority_rerun=False)
+    if team_id:
+        flash(f"Run for **{team_id}** CANCELED by supervisor and moved to the **Review Queue**.", "warning")
     return redirect(url_for('index'))
 
+
+# --- Review Queue Actions ---
 
 @APP.route('/mark_success', methods=['POST'])
 def mark_success():
@@ -480,13 +505,37 @@ def mark_failure():
         flash("No team in review state to mark as failure.", "error")
         return redirect(url_for('index'))
 
-    team = queue[review_team_index]
-    team['status'] = 'WAITING'
-    team['priority_re_run'] = True
+    team = queue.pop(review_team_index) # Remove from review
     
+    # Re-add as a waiting team with priority
+    new_entry = {
+        'team_id': team['team_id'],
+        'timestamp': datetime.now().isoformat(), 
+        'priority_re_run': True,
+        'status': 'WAITING'
+    }
+    queue.append(new_entry)
     save_data(QUEUE_FILE, queue)
     
-    flash(f"Team {team['team_id']} marked for priority re-run.", "warning")
+    flash(f"Team {team['team_id']} marked as FAILURE and placed in queue for **priority re-run**.", "warning")
+    return redirect(url_for('index'))
+
+
+@APP.route('/mark_canceled', methods=['POST'])
+def mark_canceled():
+    """NEW: Marks the current review team as canceled, removes from queue, and does NOT increment run count."""
+    queue = load_data(QUEUE_FILE)
+    review_team_index = next((i for i, team in enumerate(queue) if team.get('status') == 'REVIEW'), -1)
+
+    if review_team_index == -1:
+        flash("No team in review state to mark as canceled.", "error")
+        return redirect(url_for('index'))
+
+    review_team = queue.pop(review_team_index)
+    save_data(QUEUE_FILE, queue)
+    
+    # NOTE: Run count is NOT incremented.
+    flash(f"Team {review_team['team_id']} fully **CANCELED** from the system. Run count not affected.", "error")
     return redirect(url_for('index'))
 
 
@@ -497,8 +546,10 @@ if __name__ == '__main__':
     queue = load_data(QUEUE_FILE)
     changes_made = False
     for team in queue:
+        # If the server was shut down with a team in REVIEW, send it back to waiting without priority
         if team.get('status') == 'REVIEW' or 'status' not in team:
             team['status'] = 'WAITING'
+            team['priority_re_run'] = False # Clear priority if it was a review
             changes_made = True
             
         if 'priority_re_run' not in team:
