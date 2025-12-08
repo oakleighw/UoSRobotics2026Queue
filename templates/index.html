@@ -6,6 +6,8 @@
     <title>Robotics Run Queue</title>
     <!-- Load Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Load timer script -->
+    <script src="{{ url_for('static', filename='timer.js') }}"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
     <style>
         body {
@@ -39,10 +41,15 @@
                     </div>
 
                     <!-- Timer/Status -->
-                    <div class="text-center">
+                <div class="text-center">
                         <p class="text-lg font-semibold text-gray-700">Time Remaining:</p>
-                        <p class="text-5xl font-extrabold 
-                            {% if active_run.status == 'RUNNING' %}text-green-600 animate-pulse{% elif active_run.status == 'PAUSED' %}text-yellow-600{% else %}text-red-600{% endif %}">
+                        <p id="active-run-timer-display" 
+                        class="text-5xl font-extrabold 
+                            {% if active_run.status == 'RUNNING' %}text-green-600 animate-pulse{% elif active_run.status == 'PAUSED' %}text-yellow-600{% else %}text-red-600{% endif %}"
+                        
+                        data-seconds-remaining="{{ time_remaining_sec | default(0) }}"
+                        data-status="{{ active_run.status }}"
+                        >
                             {{ time_remaining or "00:00" }}
                         </p>
                         <span class="text-sm font-medium text-gray-500">Status: {{ active_run.status }}</span>

@@ -194,6 +194,7 @@ def index():
                            teams_history=teams_history,
                            active_run=active_run, # Pass the full structure
                            time_remaining=time_remaining,
+                           time_remaining_sec=time_remaining_sec,
                            review_team=review_team,
                            RUN_TIME_SECONDS=RUN_TIME_SECONDS) 
 
