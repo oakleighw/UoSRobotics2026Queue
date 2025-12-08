@@ -3,50 +3,73 @@ import os
 import threading
 import time
 from datetime import datetime, timedelta
-from flask import Flask, request, render_template, redirect, url_for, session
+from flask import Flask, request, render_template, redirect, url_for, session, flash
 
-# --- Configuration ---
+# --- Configuration & File Paths ---
 QUEUE_FILE = 'queue_data.json'
 RUNS_FILE = 'runs_tracker.json'
-
-# Run time in seconds (e.g., 5 minutes for testing)
-# We will now use this as the default/fallback value
+CONFIG_FILE = 'config.json' 
+MAX_CONCURRENT_RUNS = 4  # FIXED MAX SLOTS
 DEFAULT_RUN_TIME_SECONDS = 300 
 
-# --- 1. Global State Management (Protected by a Lock) ---
-# Status: IDLE, RUNNING, PAUSED, DYSFUNCTIONAL
-active_run = {
-    'team_id': None, 
-    'start_time': None,       # Time run started or was last resumed
-    'time_spent_sec': 0,      # Total seconds spent running so far
-    'timer_thread': None,     # To hold the reference to the running timer
-    'status': 'IDLE'          
-}
+# --- Config Helper Functions ---
+
+def load_config():
+    """Loads configuration data, only tracking run_time."""
+    if not os.path.exists(CONFIG_FILE):
+        return {'run_time': DEFAULT_RUN_TIME_SECONDS}
+    try:
+        with open(CONFIG_FILE, 'r') as f:
+            config = json.load(f)
+            if 'run_time' not in config:
+                 config['run_time'] = DEFAULT_RUN_TIME_SECONDS
+            return config
+    except json.JSONDecodeError:
+        print(f"Error decoding JSON from {CONFIG_FILE}. Returning default config.")
+        return {'run_time': DEFAULT_RUN_TIME_SECONDS}
+
+def save_config(config_data):
+    """Writes configuration data to a JSON file."""
+    with open(CONFIG_FILE, 'w') as f:
+        json.dump(config_data, f, indent=2)
+
+# Load initial configuration
+APP_CONFIG = load_config()
+
+# --- 1. Global State Management (Fixed 4 Slots) ---
+
+def initialize_active_runs(max_runs=MAX_CONCURRENT_RUNS):
+    """Creates the fixed 4-slot structure with an assigned_run_time field."""
+    return {
+        str(i): {
+            'team_id': None, 
+            'start_time': None,       
+            'time_spent_sec': 0,      
+            'timer_thread': None,     
+            'status': 'IDLE',
+            'assigned_run_time_sec': DEFAULT_RUN_TIME_SECONDS # Key for run time stability
+        } for i in range(1, max_runs + 1)
+    }
+
+active_runs = initialize_active_runs()
 active_lock = threading.Lock() 
 
 # --- 2. Flask Initialization ---
 APP = Flask(__name__) 
-
-# CRITICAL: Set a secret key for session management
-# **IMPORTANT**: Use a complex, random string in production!
 APP.secret_key = 'your_super_secret_key_here'
 
 
 # --- 3. JSON Helper Functions ---
 
 def load_data(filename):
-    """Loads JSON data from a file, returning an empty dict/list if the file doesn't exist."""
+    """Loads JSON data from a file."""
     if not os.path.exists(filename):
-        if filename == RUNS_FILE:
-            return {}
-        return []
-    
+        return [] if filename == QUEUE_FILE else {}
     try:
         with open(filename, 'r') as f:
             return json.load(f)
     except json.JSONDecodeError:
-        print(f"Error decoding JSON from {filename}. Returning empty structure.")
-        return {} if filename == RUNS_FILE else []
+        return [] if filename == QUEUE_FILE else {}
 
 def save_data(filename, data):
     """Writes data to a JSON file."""
@@ -54,57 +77,65 @@ def save_data(filename, data):
         json.dump(data, f, indent=2)
 
 
-# --- 4. Core Timer Logic ---
+# --- 4. Core Timer & Setting Logic ---
+
+def get_current_run_time():
+    """Retrieves the current global run time from the session/config."""
+    return session.get('run_time', APP_CONFIG['run_time'])
 
 @APP.route('/set_run_time', methods=['POST'])
 def set_run_time():
-    """Supervisor action: Sets the desired run time in the user's session."""
-    
-    # Run time is expected in minutes from the form input
-    run_time_minutes = request.form.get('run_time_minutes', '5')
+    """Supervisor action: Sets the desired run time globally (will only affect NEW runs)."""
+    run_time_minutes = request.form.get('run_time_minutes', '')
     
     try:
         minutes = int(run_time_minutes)
         if minutes > 0:
-            # Store the run time in seconds in the session
-            session['run_time'] = minutes * 60
-            print(f"Run time set to {minutes} minutes ({session['run_time']} seconds).")
+            new_run_time_seconds = minutes * 60
+            
+            # Update Session (for immediate use) and Persistent Config
+            session['run_time'] = new_run_time_seconds
+            config = load_config()
+            config['run_time'] = new_run_time_seconds
+            save_config(config)
+            
+            flash(f"Global run time set to {minutes} minutes. **This will only affect runs started from now on.**", "success")
         else:
-            print("Invalid run time entered. Must be greater than 0.")
+            flash("Invalid run time entered. Must be greater than 0.", "error")
     except ValueError:
-        print("Invalid input for run time.")
+        flash("Invalid input for run time.", "error")
         
     return redirect(url_for('index'))
 
-def cancel_active_timer():
-    """Helper to safely cancel the currently running timer thread."""
-    global active_run
-    # Check if a timer thread exists and is still active before trying to cancel
-    if active_run.get('timer_thread') and active_run['timer_thread'].is_alive():
-        active_run['timer_thread'].cancel()
-        print("Existing timer thread cancelled.")
-    # Clear the reference regardless of cancel success
-    active_run['timer_thread'] = None
 
-
-def start_run_timer(remaining_time_sec):
-    """Starts a non-blocking timer thread for the remaining run time."""
-    global active_run
+def cancel_active_timer(slot_id):
+    """Helper to safely cancel the currently running timer thread for a specific slot."""
+    global active_runs
     
-    # 1. Ensure any old timer is cancelled before starting a new one
-    cancel_active_timer()
+    run_slot = active_runs.get(slot_id)
+    if not run_slot:
+        return
+
+    if run_slot.get('timer_thread') and run_slot['timer_thread'].is_alive():
+        run_slot['timer_thread'].cancel()
+        print(f"Existing timer thread for Slot {slot_id} cancelled.")
+    run_slot['timer_thread'] = None
+
+
+def start_run_timer(slot_id, remaining_time_sec):
+    """Starts a non-blocking timer thread for the remaining run time."""
+    global active_runs
+    
+    run_slot = active_runs[slot_id]
+    cancel_active_timer(slot_id)
     
     def timer_expired():
         """Executed when the run time is up."""
         with active_lock:
-            team_id = active_run.get('team_id')
-            # Only proceed if the run is still active (not paused/ended externally)
-            if team_id and active_run['status'] == 'RUNNING':
+            team_id = run_slot.get('team_id')
+            if team_id and run_slot['status'] == 'RUNNING':
                 
-                # Load the current queue list
                 queue = load_data(QUEUE_FILE)
-                
-                # Create a new entry for the team in REVIEW status
                 review_entry = {
                     'team_id': team_id,
                     'timestamp': datetime.now().isoformat(), 
@@ -115,49 +146,41 @@ def start_run_timer(remaining_time_sec):
                 queue.append(review_entry)
                 save_data(QUEUE_FILE, queue)
 
-                # Clear the active slot and reset timer state
-                active_run.update({'team_id': None, 'start_time': None, 'time_spent_sec': 0, 'timer_thread': None, 'status': 'IDLE'})
-                print(f"Run time expired for {team_id}. Moved to review.")
+                # Reset slot to IDLE state
+                run_slot.update({
+                    'team_id': None, 
+                    'start_time': None, 
+                    'time_spent_sec': 0, 
+                    'timer_thread': None, 
+                    'status': 'IDLE',
+                    'assigned_run_time_sec': DEFAULT_RUN_TIME_SECONDS # Reset time field
+                })
+                print(f"Run time expired for {team_id} in Slot {slot_id}. Moved to review.")
             
-    # Start the timer thread
     timer_thread = threading.Timer(remaining_time_sec, timer_expired)
     timer_thread.daemon = True 
     timer_thread.start()
     
-    active_run['timer_thread'] = timer_thread
-    print(f"Timer started for {active_run['team_id']} for {remaining_time_sec:.2f} seconds.")
-
-def get_current_run_time():
-    """Retrieves the run time from the session, falling back to the default."""
-
-    # Use session.get(). The 'run_time' key stores the duration in seconds.
-    return session.get('run_time', DEFAULT_RUN_TIME_SECONDS)
+    run_slot['timer_thread'] = timer_thread
+    print(f"Timer started for {run_slot.get('team_id', 'Unknown')} in Slot {slot_id} for {remaining_time_sec:.2f} seconds.")
 
 
-# --- 5. Core Sorting Logic ---
+# --- 5. Core Sorting Logic (Same as before) ---
 
 def get_sorted_queue():
-    """
-    Loads active queue and run history, then sorts the queue based on priority rules.
-    """
+    """Loads active queue and run history, then sorts the queue based on priority rules."""
     waiting_queue = load_data(QUEUE_FILE)
     teams_history = load_data(RUNS_FILE)
 
     def custom_sort_key(entry):
         runs = teams_history.get(entry.get('team_id'), 0)
         
-        # Ensure 'status' and 'timestamp' exist for reliable sorting
         status = entry.get('status', 'WAITING')
         try:
             timestamp = datetime.fromisoformat(entry.get('timestamp'))
         except (ValueError, TypeError):
-            # Fallback for missing or malformed timestamp
             timestamp = datetime.max 
         
-        # Priority 1: Review status (REVIEW sorts as 0, WAITING sorts as 1)
-        # Priority 2: Technical Re-run 
-        # Priority 3: Total Runs Completed 
-        # Priority 4: Timestamp (tie-breaker)
         return (
             status != 'REVIEW',
             not entry.get('priority_re_run', False),
@@ -168,72 +191,71 @@ def get_sorted_queue():
     return sorted(waiting_queue, key=custom_sort_key)
 
 
-# --- 6. Flask Web Routes (Student/Display) ---
+# --- 6. Flask Web Routes (Display) ---
 
 @APP.route('/')
 def index():
-    """Renders the main queue page, calculating time remaining for the active run."""
+    """Renders the main queue page, calculating time remaining using the slot's assigned time."""
+    global active_runs
     
-    # 1. Get the current session run time here
-    CURRENT_RUN_TIME = get_current_run_time()
-    
-    time_remaining = None
+    GLOBAL_CONFIG_RUN_TIME = get_current_run_time()
+    active_runs_display = {} 
     
     with active_lock:
-        team_id = active_run['team_id']
-        status = active_run['status']
-        time_spent_sec = active_run['time_spent_sec']
-        start_time_iso = active_run['start_time']
-        
-        # Default remaining time is the full time
-        time_remaining_sec = CURRENT_RUN_TIME - time_spent_sec
+        for slot_id, slot_data in active_runs.items():
+            
+            time_remaining = None
+            
+            # Use the time ASSIGNED to the run when it started.
+            assigned_time = slot_data.get('assigned_run_time_sec', DEFAULT_RUN_TIME_SECONDS)
+            time_remaining_sec = assigned_time - slot_data['time_spent_sec'] 
 
-        if team_id:
-            if status == 'RUNNING':
-                # 1. Calculate time spent in the current active segment
-                start = datetime.fromisoformat(start_time_iso)
-                elapsed_current_segment = (datetime.now() - start).total_seconds()
+            if slot_data['team_id']:
                 
-                # 2. Total time run so far (used for display, not saving yet)
-                total_time_spent = time_spent_sec + elapsed_current_segment
-                
-                # 3. Remaining time based on total time run
-                time_remaining_sec = CURRENT_RUN_TIME - total_time_spent
-                
-                if time_remaining_sec > 0:
-                    minutes = int(time_remaining_sec // 60)
-                    seconds = int(time_remaining_sec % 60)
-                    time_remaining = f"{minutes:02d}:{seconds:02d}"
-                else:
-                    time_remaining = "00:00"
+                if slot_data['status'] == 'RUNNING':
+                    start = datetime.fromisoformat(slot_data['start_time'])
+                    elapsed_current_segment = (datetime.now() - start).total_seconds()
+                    total_time_spent = slot_data['time_spent_sec'] + elapsed_current_segment
+                    time_remaining_sec = assigned_time - total_time_spent 
                     
-            elif status == 'PAUSED' or status == 'DYSFUNCTIONAL':
-                # When paused or dysfunctional, remaining time is static based on saved time_spent_sec
-                if time_remaining_sec > 0:
-                    minutes = int(time_remaining_sec // 60)
-                    seconds = int(time_remaining_sec % 60)
-                    time_remaining = f"{minutes:02d}:{seconds:02d} ({status})"
-                else:
-                    time_remaining = "00:00 (EXPIRED)"
-                
+                    if time_remaining_sec > 0:
+                        minutes = int(time_remaining_sec // 60)
+                        seconds = int(time_remaining_sec % 60)
+                        time_remaining = f"{minutes:02d}:{seconds:02d}"
+                    else:
+                        time_remaining = "00:00"
+                        
+                elif slot_data['status'] == 'PAUSED' or slot_data['status'] == 'DYSFUNCTIONAL':
+                    if time_remaining_sec > 0:
+                        minutes = int(time_remaining_sec // 60)
+                        seconds = int(time_remaining_sec % 60)
+                        time_remaining = f"{minutes:02d}:{seconds:02d} ({slot_data['status']})"
+                    else:
+                        time_remaining = "00:00 (EXPIRED)"
+            
+            active_runs_display[slot_id] = {
+                'slot_data': slot_data,
+                'time_remaining': time_remaining,
+                'time_remaining_sec': max(0, time_remaining_sec)
+            }
+            
     queue = get_sorted_queue()
     teams_history = load_data(RUNS_FILE)
     
     review_team = next((team for team in queue if team.get('status') == 'REVIEW'), None)
     
-    # THE FIX: We pass the global constant RUN_TIME_SECONDS into the template context
     return render_template('index.html', 
                            queue=queue, 
                            teams_history=teams_history,
-                           active_run=active_run, # Pass the full structure
-                           time_remaining=time_remaining,
-                           time_remaining_sec=time_remaining_sec,
+                           active_runs_display=active_runs_display,
+                           MAX_RUNS=MAX_CONCURRENT_RUNS,
                            review_team=review_team,
-                           RUN_TIME_SECONDS=CURRENT_RUN_TIME) 
+                           RUN_TIME_SECONDS=GLOBAL_CONFIG_RUN_TIME) 
+
 
 @APP.route('/join', methods=['POST'])
 def join_queue():
-    """Handles a student's request to join the queue."""
+    """Adds a team to the waiting queue."""
     team_id = request.form.get('team_id', '').strip()
     
     if not team_id:
@@ -241,16 +263,15 @@ def join_queue():
 
     queue = load_data(QUEUE_FILE)
     
-    # Check if the team is already waiting OR in review
     if any(entry['team_id'] == team_id for entry in queue):
+        flash(f"Team {team_id} is already in the queue or in review.", "error")
         return redirect(url_for('index'))
 
-    # Check if the team is currently active
     with active_lock:
-        if active_run['team_id'] == team_id:
+        if any(run['team_id'] == team_id for run in active_runs.values()):
+            flash(f"Team {team_id} is currently running in an arena slot.", "error")
             return redirect(url_for('index'))
 
-    # Create the new queue entry
     new_entry = {
         'team_id': team_id,
         'timestamp': datetime.now().isoformat(), 
@@ -261,12 +282,12 @@ def join_queue():
     queue.append(new_entry)
     save_data(QUEUE_FILE, queue)
 
-    # Ensure the team exists in the permanent history, initializing to 0 if new
     history = load_data(RUNS_FILE)
     if team_id not in history:
         history[team_id] = 0
         save_data(RUNS_FILE, history)
-
+    
+    flash(f"Team {team_id} added to the waiting queue.", "success")
     return redirect(url_for('index'))
 
 
@@ -274,208 +295,212 @@ def join_queue():
 
 @APP.route('/start_run', methods=['POST'])
 def start_run():
-    """
-    Supervisor action: Moves the top team from WAITING to ACTIVE state and starts the timer.
-    """
-    global active_run
+    """Starts the next waiting team in an IDLE slot."""
+    global active_runs
     
+    slot_id = request.form.get('slot_id')
+    
+    if not slot_id or slot_id not in active_runs:
+        flash("Invalid slot ID provided for start run.", "error")
+        return redirect(url_for('index'))
+
     with active_lock:
-        # 1. Check if the arena is already in use
-        if active_run['team_id'] is not None:
+        run_slot = active_runs[slot_id]
+        if run_slot['team_id'] is not None:
+            flash(f"Slot {slot_id} is already in use.", "error")
             return redirect(url_for('index'))
 
     sorted_queue = get_sorted_queue()
-    
-    # Filter out teams in REVIEW state, as they cannot start a run
     waiting_team = next((team for team in sorted_queue if team.get('status') == 'WAITING'), None)
     
     if not waiting_team:
-        print("No teams in WAITING state to start a run.")
+        flash("No teams in WAITING state to start a run.", "warning")
         return redirect(url_for('index'))
 
-    # --- Step 2: Remove from Active Queue ---
     queue = load_data(QUEUE_FILE)
     
     try:
-        # Find the specific entry that was at the top of the WAITING list based on team_id and timestamp
         index_to_remove = next(i for i, entry in enumerate(queue) 
                                if entry['team_id'] == waiting_team['team_id'] and entry['timestamp'] == waiting_team['timestamp'])
         
-        # We need the full entry for the timer, so we pop it and use it
         team_entry_for_timer = queue.pop(index_to_remove)
         save_data(QUEUE_FILE, queue)
     except StopIteration:
-        print(f"Error: Could not find team {waiting_team['team_id']} in queue to start run.")
+        flash(f"Error: Could not find team {waiting_team['team_id']} in queue.", "error")
         return redirect(url_for('index'))
 
-    # Get the current run time before starting
     CURRENT_RUN_TIME = get_current_run_time()
 
-    # 3. Assign team to the active slot and start timer
     with active_lock:
-        active_run.update({
+        run_slot.update({
             'team_id': team_entry_for_timer['team_id'], 
             'start_time': datetime.now().isoformat(),
-            'time_spent_sec': 0, # Reset time spent for a new run
-            'status': 'RUNNING' 
+            'time_spent_sec': 0,
+            'status': 'RUNNING',
+            'assigned_run_time_sec': CURRENT_RUN_TIME # Assign current time to the slot
         })
     
-    # Start timer for the full run time
-    start_run_timer(CURRENT_RUN_TIME) 
-    print(f"Run started for {team_entry_for_timer['team_id']}")
+    start_run_timer(slot_id, CURRENT_RUN_TIME) 
+    flash(f"Run started for {team_entry_for_timer['team_id']} in Slot {slot_id}.", "success")
     return redirect(url_for('index'))
 
 
 @APP.route('/pause_run', methods=['POST'])
 def pause_run():
-    """Supervisor action: Pauses the active run."""
+    """Pauses an active run and saves elapsed time."""
+    slot_id = request.form.get('slot_id')
+    
+    if not slot_id or slot_id not in active_runs:
+        return redirect(url_for('index'))
+
     with active_lock:
-        if active_run['status'] == 'RUNNING':
-            # 1. Calculate time spent in the segment that just finished
-            start = datetime.fromisoformat(active_run['start_time'])
+        run_slot = active_runs[slot_id]
+        if run_slot['status'] == 'RUNNING':
+            start = datetime.fromisoformat(run_slot['start_time'])
             elapsed_current_segment = (datetime.now() - start).total_seconds()
             
-            # 2. Add to total time spent
-            active_run['time_spent_sec'] += elapsed_current_segment
+            run_slot['time_spent_sec'] += elapsed_current_segment
             
-            # 3. Update status and clear start time
-            active_run['status'] = 'PAUSED'
-            active_run['start_time'] = None
+            run_slot['status'] = 'PAUSED'
+            run_slot['start_time'] = None
             
-            # 4. Cancel the active timer thread
-            cancel_active_timer()
+            cancel_active_timer(slot_id)
             
-            print(f"Run paused for {active_run['team_id']}. Total time spent: {active_run['time_spent_sec']:.2f}s")
+            flash(f"Run paused for {run_slot['team_id']} in Slot {slot_id}.", "warning")
     return redirect(url_for('index'))
 
 
 @APP.route('/resume_run', methods=['POST'])
 def resume_run():
-    """Supervisor action: Resumes a paused or dysfunctional run."""
-
-    CURRENT_RUN_TIME = get_current_run_time()
+    """Resumes a paused or dysfunctional run."""
+    slot_id = request.form.get('slot_id')
+    
+    if not slot_id or slot_id not in active_runs:
+        return redirect(url_for('index'))
 
     with active_lock:
-        if active_run['team_id'] and (active_run['status'] == 'PAUSED' or active_run['status'] == 'DYSFUNCTIONAL'):
-            remaining_time = CURRENT_RUN_TIME - active_run['time_spent_sec']
+        run_slot = active_runs[slot_id]
+        if run_slot['team_id'] and (run_slot['status'] == 'PAUSED' or run_slot['status'] == 'DYSFUNCTIONAL'):
+            
+            # Use the time assigned to the slot when the run started
+            assigned_time = run_slot.get('assigned_run_time_sec', DEFAULT_RUN_TIME_SECONDS)
+            remaining_time = assigned_time - run_slot['time_spent_sec']
             
             if remaining_time > 0:
-                # 1. Update status and set new start time
-                active_run['status'] = 'RUNNING'
-                active_run['start_time'] = datetime.now().isoformat()
+                run_slot['status'] = 'RUNNING'
+                run_slot['start_time'] = datetime.now().isoformat()
                 
-                # 2. Restart timer for remaining time
-                start_run_timer(remaining_time) 
+                start_run_timer(slot_id, remaining_time) 
                 
-                print(f"Run resumed for {active_run['team_id']} for remaining {remaining_time:.2f}s")
+                flash(f"Run resumed for {run_slot['team_id']} in Slot {slot_id}.", "success")
             else:
-                print("Cannot resume run; time expired.")
+                flash(f"Cannot resume run for {run_slot['team_id']}; time expired.", "error")
     return redirect(url_for('index'))
 
 
 @APP.route('/mark_dysfunctional', methods=['POST'])
 def mark_dysfunctional():
-    """Supervisor action: Marks the run as dysfunctional (like a permanent pause for analysis)."""
+    """Marks a run as dysfunctional, pausing the timer and saving elapsed time."""
+    slot_id = request.form.get('slot_id')
+    
+    if not slot_id or slot_id not in active_runs:
+        return redirect(url_for('index'))
+
     with active_lock:
-        if active_run['status'] == 'RUNNING':
-            # If running, we need to save the time spent first (same logic as pause)
-            start = datetime.fromisoformat(active_run['start_time'])
+        run_slot = active_runs[slot_id]
+        if run_slot['status'] == 'RUNNING':
+            start = datetime.fromisoformat(run_slot['start_time'])
             elapsed_current_segment = (datetime.now() - start).total_seconds()
-            active_run['time_spent_sec'] += elapsed_current_segment
-            cancel_active_timer()
+            run_slot['time_spent_sec'] += elapsed_current_segment
+            cancel_active_timer(slot_id)
             
-        if active_run['team_id']: 
-            active_run['status'] = 'DYSFUNCTIONAL'
-            active_run['start_time'] = None
-            print(f"Run marked as DYSFUNCTIONAL for {active_run['team_id']}. Total time spent: {active_run['time_spent_sec']:.2f}s")
+        if run_slot['team_id']: 
+            run_slot['status'] = 'DYSFUNCTIONAL'
+            run_slot['start_time'] = None
+            flash(f"Run for {run_slot['team_id']} in Slot {slot_id} marked as DYSFUNCTIONAL.", "error")
     return redirect(url_for('index'))
 
 
 @APP.route('/end_run', methods=['POST'])
 def end_run():
-    """Supervisor action: Immediately ends and cancels the active run without recording results or review."""
+    """Completely cancels a run, resetting the slot to IDLE."""
+    slot_id = request.form.get('slot_id')
+    
+    if not slot_id or slot_id not in active_runs:
+        return redirect(url_for('index'))
+        
     with active_lock:
-        if active_run['team_id'] is not None:
-            team_id = active_run['team_id']
-            cancel_active_timer()
+        run_slot = active_runs[slot_id]
+        if run_slot['team_id'] is not None:
+            team_id = run_slot['team_id']
+            cancel_active_timer(slot_id)
             
-            # Reset the active slot completely
-            active_run.update({'team_id': None, 'start_time': None, 'time_spent_sec': 0, 'timer_thread': None, 'status': 'IDLE'})
-            print(f"Run canceled for {team_id}.")
+            run_slot.update({
+                'team_id': None, 
+                'start_time': None, 
+                'time_spent_sec': 0, 
+                'timer_thread': None, 
+                'status': 'IDLE',
+                'assigned_run_time_sec': DEFAULT_RUN_TIME_SECONDS # Reset time field
+            })
+            flash(f"Run for {team_id} in Slot {slot_id} completely CANCELED.", "warning")
             
     return redirect(url_for('index'))
 
 
 @APP.route('/mark_success', methods=['POST'])
 def mark_success():
-    """
-    Supervisor action: Handles team in REVIEW state as SUCCESSFUL.
-    1. Removes team from queue_data.json.
-    2. Increments run count in runs_tracker.json.
-    """
-    # 1. Find the team in REVIEW state (we only look for the first one, as they are highest priority)
+    """Marks the current review team as successful, increments run count, and removes from queue."""
     queue = load_data(QUEUE_FILE)
     review_team_index = next((i for i, team in enumerate(queue) if team.get('status') == 'REVIEW'), -1)
 
     if review_team_index == -1:
-        print("No team in review state to mark as successful.")
+        flash("No team in review state to mark as successful.", "error")
         return redirect(url_for('index'))
 
     review_team = queue.pop(review_team_index)
     save_data(QUEUE_FILE, queue)
 
-    # 2. Update Run Count in History
     history = load_data(RUNS_FILE)
     team_id = review_team['team_id']
     history[team_id] = history.get(team_id, 0) + 1 
     save_data(RUNS_FILE, history)
     
-    print(f"Team {team_id} successfully completed run. Total runs: {history[team_id]}")
+    flash(f"Team {team_id} successfully completed run. Total runs: {history[team_id]}.", "success")
     return redirect(url_for('index'))
 
 
 @APP.route('/mark_failure', methods=['POST'])
 def mark_failure():
-    """
-    Supervisor action: Handles team in REVIEW state as TECHNICAL FAILURE.
-    1. Updates the team's status to WAITING and sets 'priority_re_run' to True.
-    2. DOES NOT increment run count.
-    """
-    # 1. Find the team in REVIEW state
+    """Marks the current review team as a failure, giving them priority for a re-run."""
     queue = load_data(QUEUE_FILE)
     review_team_index = next((i for i, team in enumerate(queue) if team.get('status') == 'REVIEW'), -1)
 
     if review_team_index == -1:
-        print("No team in review state to mark as failure.")
+        flash("No team in review state to mark as failure.", "error")
         return redirect(url_for('index'))
 
-    # 2. Update the existing entry
     team = queue[review_team_index]
     team['status'] = 'WAITING'
     team['priority_re_run'] = True
-    # Crucially, the timestamp should NOT be updated, so they maintain their original position priority
     
     save_data(QUEUE_FILE, queue)
     
-    print(f"Team {team['team_id']} marked for priority re-run due to failure.")
-    # No need to update runs_tracker.json
+    flash(f"Team {team['team_id']} marked for priority re-run.", "warning")
     return redirect(url_for('index'))
 
 
 # --- 8. Run the Application ---
 
 if __name__ == '__main__':
-    # CRITICAL FIX: Ensure all queue entries have the necessary keys for reliable operation,
-    # and clear any REVIEW status from a crash.
+    # Cleanup: Ensure all REVIEW teams are returned to WAITING on startup
     queue = load_data(QUEUE_FILE)
     changes_made = False
     for team in queue:
-        # 1. Ensure 'status' exists and clear 'REVIEW' status
         if team.get('status') == 'REVIEW' or 'status' not in team:
             team['status'] = 'WAITING'
             changes_made = True
             
-        # 2. Ensure 'priority_re_run' exists
         if 'priority_re_run' not in team:
             team['priority_re_run'] = False
             changes_made = True
@@ -483,6 +508,10 @@ if __name__ == '__main__':
     if changes_made:
         save_data(QUEUE_FILE, queue)
 
-    # host='0.0.0.0' allows access from other devices on the network
-    # debug=True allows for automatic reloading on code changes
+    # Initialize run_time in the session if not present (using config value)
+    with APP.test_request_context('/'):
+        if 'run_time' not in session:
+            session['run_time'] = APP_CONFIG['run_time']
+
+    # Start the application
     APP.run(debug=True, host='0.0.0.0', port=5000)
