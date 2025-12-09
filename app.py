@@ -374,15 +374,17 @@ if __name__ == '__main__':
     # TEAM_C (2 runs, No Priority) should be #4.
     # TEAM_A (3 runs, No Priority) should be #5.
     
-    if not teams_history:
-        teams_history = {'TEAM_A': 3, 'TEAM_B': 1, 'TEAM_C': 2, 'TEAM_D': 0}
+    # For testing see below
+
+    # if not teams_history:
+    #     teams_history = {'TEAM_A': 3, 'TEAM_B': 1, 'TEAM_C': 2, 'TEAM_D': 0}
         
-    if not queue:
-        queue.append({'team_id': 'TEAM_A', 'status': 'WAITING', 'priority_re_run': False, 'time_added': time.time() - 4}) # 3 runs, Joins earliest
-        queue.append({'team_id': 'TEAM_C', 'status': 'WAITING', 'priority_re_run': False, 'time_added': time.time() - 3}) # 2 runs
-        queue.append({'team_id': 'TEAM_B', 'status': 'WAITING', 'priority_re_run': True, 'time_added': time.time() - 2}) # 1 run, PRIORITY
-        queue.append({'team_id': 'TEAM_D', 'status': 'WAITING', 'priority_re_run': False, 'time_added': time.time() - 1}) # 0 runs, Joins later
-        queue.append({'team_id': 'TEAM_E', 'status': 'WAITING', 'priority_re_run': False, 'time_added': time.time()}) # 0 runs, Joins last
+    # if not queue:
+    #     queue.append({'team_id': 'TEAM_A', 'status': 'WAITING', 'priority_re_run': False, 'time_added': time.time() - 4}) # 3 runs, Joins earliest
+    #     queue.append({'team_id': 'TEAM_C', 'status': 'WAITING', 'priority_re_run': False, 'time_added': time.time() - 3}) # 2 runs
+    #     queue.append({'team_id': 'TEAM_B', 'status': 'WAITING', 'priority_re_run': True, 'time_added': time.time() - 2}) # 1 run, PRIORITY
+    #     queue.append({'team_id': 'TEAM_D', 'status': 'WAITING', 'priority_re_run': False, 'time_added': time.time() - 1}) # 0 runs, Joins later
+    #     queue.append({'team_id': 'TEAM_E', 'status': 'WAITING', 'priority_re_run': False, 'time_added': time.time()}) # 0 runs, Joins last
         
         # Expected order: D, E, B, C, A
 
