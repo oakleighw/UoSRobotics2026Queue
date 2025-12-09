@@ -189,17 +189,23 @@
                                 </p>
                                 
                                 <div class="mt-2 flex space-x-2">
+                                    
                                     <form action="{{ url_for('mark_success') }}" method="post" class="flex-1" onsubmit="return confirmAction('SUCCESS', 'Mark Team {{ team.team_id }} as SUCCESSFUL?')">
+                                        <input type="hidden" name="team_id" value="{{ team.team_id }}"> 
                                         <button type="submit" class="w-full text-xs bg-green-500 hover:bg-green-600 text-white py-1 rounded">
                                             SUCCESS
                                         </button>
                                     </form>
+                                    
                                     <form action="{{ url_for('mark_failure') }}" method="post" class="flex-1" onsubmit="return confirmAction('FAILURE', 'Mark Team {{ team.team_id }} as TECHNICAL FAILURE (Priority Re-run)?')">
+                                        <input type="hidden" name="team_id" value="{{ team.team_id }}">
                                         <button type="submit" class="w-full text-xs bg-yellow-500 hover:bg-yellow-600 text-white py-1 rounded">
                                             FAILURE
                                         </button>
                                     </form>
+                                    
                                     <form action="{{ url_for('mark_canceled') }}" method="post" class="flex-1" onsubmit="return confirmAction('CANCELED', 'Mark Team {{ team.team_id }} as CANCELED (Remove from system, no run count)?')">
+                                        <input type="hidden" name="team_id" value="{{ team.team_id }}">
                                         <button type="submit" class="w-full text-xs bg-gray-500 hover:bg-gray-600 text-white py-1 rounded">
                                             CANCELED
                                         </button>
