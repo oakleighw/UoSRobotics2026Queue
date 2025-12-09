@@ -47,7 +47,7 @@ def get_time_remaining(run_data):
         
         # Clear the active slot
         active_runs[slot_id] = {'team_id': None, 'start_time': None, 'status': 'IDLE', 'time_paused_at': None, 'time_remaining': None}
-        flash(f'Team {team_id} run has ended (time out) and moved to **Review Queue**!', 'warning')
+        flash(f'Team {team_id} run has ended (time out) and moved to REVIEW Queue!', 'warning')
         return 0
 
     return remaining
@@ -162,7 +162,7 @@ def join_queue():
         
     # Check if the team is already running or waiting
     if any(item['team_id'] == team_id and item['status'] in ('WAITING', 'RUNNING') for item in queue):
-        flash(f'Team **{team_id}** is already in the queue or currently running.', 'warning')
+        flash(f'Team {team_id} is already in the queue or currently running.', 'warning')
         return redirect(url_for('index'))
     
     # Add new team to the queue with default status
@@ -172,7 +172,7 @@ def join_queue():
         'priority_re_run': False, # New teams start with no priority
         'time_added': time.time()
     })
-    flash(f'Team **{team_id}** added to the waiting queue.', 'success')
+    flash(f'Team {team_id} added to the waiting queue.', 'success')
     return redirect(url_for('index'))
 
 @app.route('/start_run', methods=['POST'])
@@ -203,10 +203,10 @@ def start_run():
     team_index = next((i for i, item in enumerate(queue) if item['team_id'] == team_id_to_start and item['status'] == 'WAITING'), None)
     if team_index is not None:
         queue[team_index]['status'] = 'RUNNING'
-        flash(f'Team **{team_id_to_start}** started run in Slot **{slot_id}**.', 'success')
+        flash(f'Team {team_id_to_start} started run in Slot {slot_id}.', 'success')
     else:
         # Should not happen if get_next_team_in_queue is correct
-        flash(f'Error: Could not find **{team_id_to_start}** in the waiting queue.', 'error')
+        flash(f'Error: Could not find {team_id_to_start} in the WAITING queue.', 'error')
         
     return redirect(url_for('index'))
 
@@ -227,9 +227,9 @@ def pause_run():
         team_index = next((i for i, item in enumerate(queue) if item['team_id'] == run_data['team_id'] and item['status'] == 'RUNNING'), None)
         if team_index is not None:
             queue[team_index]['status'] = 'PAUSED'
-            flash(f'Team **{run_data["team_id"]}** run in Slot **{slot_id}** has been **PAUSED**.', 'warning')
+            flash(f'Team {run_data["team_id"]} run in Slot {slot_id} has been PAUSED.', 'warning')
     else:
-        flash(f'Slot **{slot_id}** is not running.', 'error')
+        flash(f'Slot {slot_id} is not running.', 'error')
     return redirect(url_for('index'))
 
 @app.route('/resume_run', methods=['POST'])
@@ -248,9 +248,9 @@ def resume_run():
         team_index = next((i for i, item in enumerate(queue) if item['team_id'] == run_data['team_id']), None)
         if team_index is not None:
             queue[team_index]['status'] = 'RUNNING'
-            flash(f'Team **{run_data["team_id"]}** run in Slot **{slot_id}** has been **RESUMED**.', 'success')
+            flash(f'Team {run_data["team_id"]} run in Slot {slot_id} has been RESUMED.', 'success')
     else:
-        flash(f'Slot **{slot_id}** is not paused or dysfunctional.', 'error')
+        flash(f'Slot {slot_id} is not paused or dysfunctional.', 'error')
     return redirect(url_for('index'))
 
 
@@ -276,9 +276,9 @@ def mark_dysfunctional():
         if team_index is not None:
             queue[team_index]['status'] = 'PAUSED' # Keep it PAUSED until review/resume
             queue[team_index]['priority_re_run'] = True # Set the priority flag
-            flash(f'Team **{team_id}** run in Slot **{slot_id}** marked as **DYSFUNCTIONAL**. It can be resumed or sent to review.', 'warning')
+            flash(f'Team {team_id} run in Slot {slot_id} marked as DYSFUNCTIONAL. It can be resumed or sent to review.', 'warning')
     else:
-        flash(f'Slot **{slot_id}** is not running.', 'error')
+        flash(f'Slot {slot_id} is NOT running.', 'error')
         
     return redirect(url_for('index'))
 
@@ -295,12 +295,12 @@ def end_run():
         if team_index is not None:
             queue[team_index]['status'] = 'REVIEW'
             # If it was dysfunctional, the priority_re_run flag remains true for the review stage
-            flash(f'Team **{team_id}** run in Slot **{slot_id}** ended and moved to **Review Queue**.', 'success')
+            flash(f'Team {team_id} run in Slot {slot_id} ended and moved to REVIEW Queue.', 'success')
             
         # 2. Clear the active slot
         active_runs[slot_id] = {'team_id': None, 'start_time': None, 'status': 'IDLE', 'time_paused_at': None, 'time_remaining': None}
     else:
-        flash(f'Slot **{slot_id}** has no active run to end.', 'error')
+        flash(f'Slot {slot_id} has no active run to end.', 'error')
         
     return redirect(url_for('index'))
 
@@ -311,7 +311,7 @@ def handle_review_action(team_id, action_status, clear_flag):
     team_index = next((i for i, item in enumerate(queue) if item['team_id'] == team_id and item['status'] == 'REVIEW'), None)
     
     if team_index is None:
-        flash(f'Team **{team_id}** not found in the review queue.', 'error')
+        flash(f'Team {team_id} not found in the review queue.', 'error')
         return redirect(url_for('index'))
         
     if action_status == 'SUCCESS':
@@ -319,18 +319,18 @@ def handle_review_action(team_id, action_status, clear_flag):
         teams_history[team_id] = teams_history.get(team_id, 0) + 1
         # Remove from queue
         queue.pop(team_index)
-        flash(f'Team **{team_id}** run marked as **SUCCESSFUL**. Run count incremented.', 'success')
+        flash(f'Team {team_id} run marked as SUCCESSFUL. Run count incremented.', 'success')
         
     elif action_status == 'FAILURE':
         # Technical Failure means we don't count the run and re-add them to the queue with priority
         queue[team_index]['status'] = 'WAITING'
         queue[team_index]['priority_re_run'] = True # Ensure they get highest WAITING priority
-        flash(f'Team **{team_id}** run marked as **TECHNICAL FAILURE**. Re-added to waiting queue with **PRIORITY**.', 'warning')
+        flash(f'Team {team_id} run marked as TECHNICAL FAILURE. Re-added to waiting queue with PRIORITY.', 'warning')
         
     elif action_status == 'CANCELED':
         # Remove from queue (no count increment)
         queue.pop(team_index)
-        flash(f'Team **{team_id}** run marked as **CANCELED**. Run count not affected.', 'error')
+        flash(f'Team {team_id} run marked as CANCELED. Run count not affected.', 'error')
         
     return redirect(url_for('index'))
 
@@ -360,7 +360,7 @@ def set_run_time():
         if minutes <= 0:
             raise ValueError
         RUN_TIME_SECONDS = minutes * 60
-        flash(f'Run time updated to **{minutes} minutes**.', 'success')
+        flash(f'Run time updated to {minutes} minutes.', 'success')
     except ValueError:
         flash('Invalid run time. Must be a positive integer.', 'error')
     return redirect(url_for('index'))
