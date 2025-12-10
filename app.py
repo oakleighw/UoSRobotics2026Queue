@@ -1,5 +1,6 @@
 from flask import Flask, render_template, request, redirect, url_for, flash
 import time
+import re
 from datetime import datetime, timedelta
 
 app = Flask(__name__)
@@ -16,6 +17,8 @@ active_runs = {
 # Default run time is 5 minutes (300 seconds)
 RUN_TIME_SECONDS = 300 
 teams_history = {} # {'TEAM_A': 2, 'TEAM_B': 1}
+
+TEAM_PREFIX = "Team " # Default Prefix
 
 # --- Helper Functions for Time and Display ---
 
@@ -47,7 +50,7 @@ def get_time_remaining(run_data):
         
         # Clear the active slot
         active_runs[slot_id] = {'team_id': None, 'start_time': None, 'status': 'IDLE', 'time_paused_at': None, 'time_remaining': None}
-        flash(f'Team {team_id} run has ended (time out) and moved to REVIEW Queue!', 'warning')
+        flash(f'{team_id} run has ended (time out) and moved to REVIEW Queue!', 'warning')
         return 0
 
     return remaining
@@ -150,11 +153,26 @@ def index():
                            active_runs_display=active_runs_display, 
                            next_waiting_team=next_waiting_team, # This is used by the IDLE slot button
                            RUN_TIME_SECONDS=RUN_TIME_SECONDS,
-                           teams_history=teams_history)
+                           teams_history=teams_history,
+                           TEAM_PREFIX=TEAM_PREFIX)
 
 @app.route('/join_queue', methods=['POST'])
 def join_queue():
-    team_id = request.form['team_id'].upper().strip()
+
+    # Get the raw input (e.g., '1', 'B', '1B')
+    raw_team_id = request.form['team_id'].upper().strip()
+
+    # Validation Logic
+    # Regex for: 1 to 4 alphanumeric characters (A-Z or 0-9)
+    # The team_id must be 1, 2, 3, or 4 characters.
+    
+    # Only allow 1-4 alphanumeric characters
+    if not re.fullmatch(r'^[A-Z0-9]{1,4}$', raw_team_id):
+        flash('Invalid Team ID. Must be 1 to 4 characters long and contain only letters or numbers (e.g., "1", "B", "1B", "100B").', 'error')
+        return redirect(url_for('index'))
+
+    # 2. Apply the Global Prefix
+    team_id = f"{TEAM_PREFIX}{raw_team_id}"
     
     if not team_id:
         flash('Team ID cannot be empty.', 'error')
@@ -162,7 +180,7 @@ def join_queue():
         
     # Check if the team is already running or waiting
     if any(item['team_id'] == team_id and item['status'] in ('WAITING', 'RUNNING') for item in queue):
-        flash(f'Team {team_id} is already in the queue or currently running.', 'warning')
+        flash(f'{team_id} is already in the queue or currently running.', 'warning')
         return redirect(url_for('index'))
     
     # Initialize run count
@@ -176,8 +194,9 @@ def join_queue():
         'priority_re_run': False, # New teams start with no priority
         'time_added': time.time()
     })
-    flash(f'Team {team_id} added to the waiting queue.', 'success')
+    flash(f'{team_id} added to the waiting queue.', 'success')
     return redirect(url_for('index'))
+
 
 @app.route('/remove_from_queue', methods=['POST'])
 def remove_from_queue():
@@ -192,10 +211,10 @@ def remove_from_queue():
         
         # 2. Ensure team history is recorded 
         
-        flash(f'Team {team_id_to_remove} has been removed from the waiting queue.', 'error')
+        flash(f'{team_id_to_remove} has been removed from the waiting queue.', 'error')
     else:
         # This catches scenarios where the team is not WAITNG (e.g., RUNNING, PAUSED, REVIEW)
-        flash(f'Team {team_id_to_remove} is not in the waiting queue and cannot be removed this way.', 'warning')
+        flash(f'{team_id_to_remove} is not in the waiting queue and cannot be removed this way.', 'warning')
         
     return redirect(url_for('index'))
 
@@ -227,7 +246,7 @@ def start_run():
     team_index = next((i for i, item in enumerate(queue) if item['team_id'] == team_id_to_start and item['status'] == 'WAITING'), None)
     if team_index is not None:
         queue[team_index]['status'] = 'RUNNING'
-        flash(f'Team {team_id_to_start} started run in Slot {slot_id}.', 'success')
+        flash(f'{team_id_to_start} started run in Slot {slot_id}.', 'success')
     else:
         # Should not happen if get_next_team_in_queue is correct
         flash(f'Error: Could not find {team_id_to_start} in the WAITING queue.', 'error')
@@ -305,7 +324,7 @@ def mark_dysfunctional():
         if team_index is not None:
             queue[team_index]['status'] = 'PAUSED' # Keep it PAUSED until review/resume
             queue[team_index]['priority_re_run'] = True # Set the priority flag
-            flash(f'Team {team_id} run in Slot {slot_id} marked as DYSFUNCTIONAL. It can be resumed or sent to review.', 'warning')
+            flash(f'{team_id} run in Slot {slot_id} marked as DYSFUNCTIONAL. It can be resumed or sent to review.', 'warning')
     else:
         flash(f'Slot {slot_id} is NOT running.', 'error')
         
@@ -324,7 +343,7 @@ def end_run():
         if team_index is not None:
             queue[team_index]['status'] = 'REVIEW'
             # If it was dysfunctional, the priority_re_run flag remains true for the review stage
-            flash(f'Team {team_id} run in Slot {slot_id} ended and moved to REVIEW Queue.', 'success')
+            flash(f'{team_id} run in Slot {slot_id} ended and moved to REVIEW Queue.', 'success')
             
         # 2. Clear the active slot
         active_runs[slot_id] = {'team_id': None, 'start_time': None, 'status': 'IDLE', 'time_paused_at': None, 'time_remaining': None}
@@ -340,7 +359,7 @@ def handle_review_action(team_id, action_status, clear_flag):
     team_index = next((i for i, item in enumerate(queue) if item['team_id'] == team_id and item['status'] == 'REVIEW'), None)
     
     if team_index is None:
-        flash(f'Team {team_id} not found in the review queue.', 'error')
+        flash(f'{team_id} not found in the review queue.', 'error')
         return redirect(url_for('index'))
         
     if action_status == 'SUCCESS':
@@ -348,18 +367,18 @@ def handle_review_action(team_id, action_status, clear_flag):
         teams_history[team_id] = teams_history.get(team_id, 0) + 1
         # Remove from queue
         queue.pop(team_index)
-        flash(f'Team {team_id} run marked as SUCCESSFUL. Run count incremented.', 'success')
+        flash(f'{team_id} run marked as SUCCESSFUL. Run count incremented.', 'success')
         
     elif action_status == 'FAILURE':
         # Technical Failure means we don't count the run and re-add them to the queue with priority
         queue[team_index]['status'] = 'WAITING'
         queue[team_index]['priority_re_run'] = True # Ensure they get highest WAITING priority
-        flash(f'Team {team_id} run marked as TECHNICAL FAILURE. Re-added to waiting queue with PRIORITY.', 'warning')
+        flash(f'{team_id} run marked as TECHNICAL FAILURE. Re-added to waiting queue with PRIORITY.', 'warning')
         
     elif action_status == 'CANCELED':
         # Remove from queue (no count increment)
         queue.pop(team_index)
-        flash(f'Team {team_id} run marked as CANCELED. Run count not affected.', 'error')
+        flash(f'{team_id} run marked as CANCELED. Run count not affected.', 'error')
         
     return redirect(url_for('index'))
 
@@ -414,9 +433,9 @@ def delete_team_completely():
             
     
     if deleted_from_history or deleted_from_queue_count > 0:
-        flash(f'Team {team_id_to_delete} was completely deleted. History removed and {deleted_from_queue_count} queue/active entries cleared.', 'success')
+        flash(f'{team_id_to_delete} was completely deleted. History removed and {deleted_from_queue_count} queue/active entries cleared.', 'success')
     else:
-        flash(f'Team {team_id_to_delete} not found in history or queue.', 'warning')
+        flash(f'{team_id_to_delete} not found in history or queue.', 'warning')
         
     return redirect(url_for('index'))
 
@@ -433,6 +452,53 @@ def set_run_time():
         flash(f'Run time updated to {minutes} minutes.', 'success')
     except ValueError:
         flash('Invalid run time. Must be a positive integer.', 'error')
+    return redirect(url_for('index'))
+
+@app.route('/set_team_prefix', methods=['POST'])
+def set_team_prefix():
+    global teams_history
+    global TEAM_PREFIX
+    new_prefix = request.form['team_prefix'].strip()
+    
+    # Simple validation to prevent empty prefix or overly long prefix
+    if not new_prefix:
+        flash('Team prefix cannot be empty.', 'error')
+        return redirect(url_for('index'))
+    
+    # Ensure prefix ends in a separator for clean display (e.g., "Team" -> "Team ")
+    if not (new_prefix.endswith('_') or new_prefix.endswith('-') or new_prefix.endswith(' ')):
+        new_prefix += ' '
+        
+    old_prefix = TEAM_PREFIX
+    
+    # If the prefix is changed, we need to update all team IDs in active_runs, queue, and teams_history.
+    if new_prefix != old_prefix:
+        # 1. Update Active Runs
+        for slot_id in active_runs:
+            if active_runs[slot_id]['team_id']:
+                # The team_id is old_prefix + raw_id. We need to strip old_prefix.
+                raw_id = active_runs[slot_id]['team_id'].replace(old_prefix, '', 1)
+                active_runs[slot_id]['team_id'] = new_prefix + raw_id
+                
+        # 2. Update Queue
+        for item in queue:
+            raw_id = item['team_id'].replace(old_prefix, '', 1)
+            item['team_id'] = new_prefix + raw_id
+
+        # 3. Update History
+        new_teams_history = {}
+        for team_id, count in teams_history.items():
+            raw_id = team_id.replace(old_prefix, '', 1)
+            new_teams_history[new_prefix + raw_id] = count
+        teams_history = new_teams_history
+
+        # Finally, set the new global prefix
+        TEAM_PREFIX = new_prefix
+        
+        flash(f'Team prefix updated to "{TEAM_PREFIX}". All teams renamed.', 'success')
+    else:
+        flash(f'Team prefix remains "{TEAM_PREFIX}".', 'info')
+        
     return redirect(url_for('index'))
 
 if __name__ == '__main__':
