@@ -399,7 +399,36 @@ def mark_canceled():
     return handle_review_action(team_id, 'CANCELED', True)
 
 
-# --- Team Management Action (Complete Deletion) ---
+# --- Team Management Actions ---
+@app.route('/re_add_to_queue', methods=['POST'])
+def re_add_to_queue():
+    team_id = request.form['team_id']
+    
+    if not team_id:
+        flash('Team ID not provided.', 'error')
+        return redirect(url_for('index'))
+        
+    # Check if the team is already running or waiting
+    if any(item['team_id'] == team_id and item['status'] in ('WAITING', 'RUNNING', 'PAUSED', 'DYSFUNCTIONAL') for item in queue):
+        flash(f'Team {team_id} is currently running, paused, or already in the waiting queue.', 'warning')
+        return redirect(url_for('index'))
+
+    # Check if the team is in the review queue and prevent adding
+    if any(item['team_id'] == team_id and item['status'] == 'REVIEW' for item in queue):
+        flash(f'Team {team_id} is in the REVIEW Queue and must be resolved before being re-added.', 'warning')
+        return redirect(url_for('index'))
+    
+    # The team already exists in teams_history, so we don't need to initialize the count.
+    
+    # Add team back to the queue
+    queue.append({
+        'team_id': team_id,
+        'status': 'WAITING',
+        'priority_re_run': False, # Not a priority re-run by default, unless manually added later
+        'time_added': time.time()
+    })
+    flash(f'Team {team_id} re-added to the waiting queue.', 'success')
+    return redirect(url_for('index'))
 
 @app.route('/delete_team_completely', methods=['POST'])
 def delete_team_completely():
