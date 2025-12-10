@@ -275,7 +275,7 @@ def pause_run():
         team_index = next((i for i, item in enumerate(queue) if item['team_id'] == run_data['team_id'] and item['status'] == 'RUNNING'), None)
         if team_index is not None:
             queue[team_index]['status'] = 'PAUSED'
-            flash(f'Team {run_data["team_id"]} run in Slot {slot_id} has been PAUSED.', 'warning')
+            flash(f'{run_data["team_id"]} run in Slot {slot_id} has been PAUSED.', 'warning')
     else:
         flash(f'Slot {slot_id} is not running.', 'error')
     return redirect(url_for('index'))
@@ -296,7 +296,7 @@ def resume_run():
         team_index = next((i for i, item in enumerate(queue) if item['team_id'] == run_data['team_id']), None)
         if team_index is not None:
             queue[team_index]['status'] = 'RUNNING'
-            flash(f'Team {run_data["team_id"]} run in Slot {slot_id} has been RESUMED.', 'success')
+            flash(f'{run_data["team_id"]} run in Slot {slot_id} has been RESUMED.', 'success')
     else:
         flash(f'Slot {slot_id} is not paused or dysfunctional.', 'error')
     return redirect(url_for('index'))
