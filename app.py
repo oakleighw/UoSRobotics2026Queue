@@ -165,6 +165,10 @@ def join_queue():
         flash(f'Team {team_id} is already in the queue or currently running.', 'warning')
         return redirect(url_for('index'))
     
+    # Initialize run count
+    if team_id not in teams_history:
+        teams_history[team_id] = 0
+    
     # Add new team to the queue with default status
     queue.append({
         'team_id': team_id,
@@ -173,6 +177,26 @@ def join_queue():
         'time_added': time.time()
     })
     flash(f'Team {team_id} added to the waiting queue.', 'success')
+    return redirect(url_for('index'))
+
+@app.route('/remove_from_queue', methods=['POST'])
+def remove_from_queue():
+    team_id_to_remove = request.form['team_id']
+    
+    # Find the team in the queue list
+    team_index = next((i for i, item in enumerate(queue) if item['team_id'] == team_id_to_remove and item['status'] == 'WAITING'), None)
+    
+    if team_index is not None:
+        # 1. Remove from the queue
+        queue.pop(team_index)
+        
+        # 2. Ensure team history is recorded 
+        
+        flash(f'Team {team_id_to_remove} has been removed from the waiting queue.', 'error')
+    else:
+        # This catches scenarios where the team is not WAITNG (e.g., RUNNING, PAUSED, REVIEW)
+        flash(f'Team {team_id_to_remove} is not in the waiting queue and cannot be removed this way.', 'warning')
+        
     return redirect(url_for('index'))
 
 @app.route('/start_run', methods=['POST'])

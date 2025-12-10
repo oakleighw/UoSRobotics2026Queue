@@ -208,9 +208,21 @@
                                     <span class="font-bold">{{ team.team_id }}</span>
                                     {% if team.priority_re_run %}<span class="text-red-500 text-sm ml-2">(Priority Re-run)</span>{% endif %}
                                 </span>
-                                <span class="text-sm text-gray-500">
-                                    Runs: <span class="font-semibold text-gray-700">{{ teams_history.get(team.team_id, 0) }}</span>
-                                </span>
+                                <div class="flex items-center space-x-2">
+    <span class="text-sm text-gray-500">
+        Runs: <span class="font-semibold text-gray-700">{{ teams_history.get(team.team_id, 0) }}</span>
+    </span>
+    
+    <form action="{{ url_for('remove_from_queue') }}" method="post" class="inline-block"
+        onsubmit="return confirm('Are you sure you want to remove Team {{ team.team_id }} from the queue? Their run count will remain: {{ teams_history.get(team.team_id, 0) }}')">
+        <input type="hidden" name="team_id" value="{{ team.team_id }}">
+        <button type="submit" 
+                class="text-red-500 hover:text-red-700 p-1 rounded-full hover:bg-red-100 transition duration-150"
+                title="Remove from Queue (Run count not affected)">
+            🗑️
+        </button>
+    </form>
+</div>
                             </div>
                         {% endfor %}
                     </div>
