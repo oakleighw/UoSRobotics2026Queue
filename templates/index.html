@@ -85,17 +85,17 @@
                                     {% if data.slot_data.status == 'RUNNING' %}
                                         <form method="POST" action="{{ url_for('pause_run') }}" class="w-full">
                                             <input type="hidden" name="slot_id" value="{{ slot_id }}">
-                                            <button type="submit" class="w-full bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-2 rounded transition duration-150">⏸️</button>
+                                            <button type="submit" class="w-full bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-2 rounded transition duration-150" title="Pause Run">⏸️</button>
                                         </form>
                                         <form method="POST" action="{{ url_for('mark_dysfunctional') }}" class="w-full">
                                             <input type="hidden" name="slot_id" value="{{ slot_id }}">
                                             <button type="submit" class="w-full bg-red-500 hover:bg-red-600 text-white font-bold py-2 rounded transition duration-150" 
-                                                onclick="return confirmAction('DYSFUNCTIONAL', 'Are you sure you want to mark this run as DYSFUNCTIONAL and send to review?')">⚠️</button>
+                                                onclick="return confirmAction('DYSFUNCTIONAL', 'Are you sure you want to mark this run as DYSFUNCTIONAL and send to review?')" title="Mark Dysfunctional">⚠️</button>
                                         </form>
                                     {% elif data.slot_data.status == 'PAUSED' or data.slot_data.status == 'DYSFUNCTIONAL' %}
                                         <form method="POST" action="{{ url_for('resume_run') }}" class="w-full">
                                             <input type="hidden" name="slot_id" value="{{ slot_id }}">
-                                            <button type="submit" class="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-2 rounded transition duration-150">▶️</button>
+                                            <button type="submit" class="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-2 rounded transition duration-150" title="Resume Run">▶️</button>
                                         </form>
                                     {% endif %}
                                     
@@ -103,7 +103,7 @@
                                         <form method="POST" action="{{ url_for('end_run') }}" class="w-full" 
                                             onsubmit="return confirmAction('END RUN', 'Are you sure you want to END this run and send to review?')">
                                             <input type="hidden" name="slot_id" value="{{ slot_id }}">
-                                            <button type="submit" class="w-full bg-gray-400 hover:bg-gray-500 text-white font-bold py-2 rounded transition duration-150">❌</button>
+                                            <button type="submit" class="w-full bg-gray-400 hover:bg-gray-500 text-white font-bold py-2 rounded transition duration-150" title="End Run">❌</button>
                                         </form>
                                     {% endif %}
                                 </div>
