@@ -256,12 +256,24 @@
                 <h2 class="text-xl font-bold mb-4 text-blue-700">🏆 Team Runs Tally</h2>
                 <div class="h-40 overflow-y-auto space-y-1">
                     {% if teams_history %}
-                        {% for team_id, count in teams_history.items()|sort(attribute='1', reverse=true) %}
-                            <div class="flex justify-between items-center p-2 bg-white rounded-lg shadow-sm border border-blue-100">
-                                <span class="font-semibold text-gray-800">{{ team_id }}</span>
-                                <span class="text-xl font-extrabold text-blue-600">{{ count }}</span>
-                            </div>
-                        {% endfor %}
+{% for team_id, count in teams_history.items()|sort(attribute='1', reverse=true) %}
+    <div class="flex justify-between items-center p-2 bg-white rounded-lg shadow-sm border border-blue-100">
+        <span class="font-semibold text-gray-800">{{ team_id }}</span>
+        <div class="flex items-center space-x-3">
+            <span class="text-xl font-extrabold text-blue-600">{{ count }}</span>
+            
+            <form action="{{ url_for('delete_team_completely') }}" method="post" class="inline-block"
+                onsubmit="return confirm('⚠️ WARNING: Are you sure you want to completely DELETE Team {{ team_id }}? This removes all run history and any active queue entries.')">
+                <input type="hidden" name="team_id" value="{{ team_id }}">
+                <button type="submit" 
+                        class="text-red-700 hover:text-white p-1 rounded-full bg-red-100 hover:bg-red-600 transition duration-150 text-sm font-semibold px-2"
+                        title="Permanently Delete Team and Run History">
+                    🗑️
+                </button>
+            </form>
+        </div>
+    </div>
+{% endfor %}
                     {% else %}
                         <p class="text-gray-400 italic">No runs recorded yet.</p>
                     {% endif %}

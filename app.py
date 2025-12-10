@@ -379,6 +379,47 @@ def mark_canceled():
     team_id = request.form['team_id']
     return handle_review_action(team_id, 'CANCELED', True)
 
+
+# --- Team Management Action (Complete Deletion) ---
+
+@app.route('/delete_team_completely', methods=['POST'])
+def delete_team_completely():
+    global teams_history, queue
+    team_id_to_delete = request.form['team_id']
+    
+    deleted_from_history = False
+    deleted_from_queue_count = 0
+    
+    # 1. Remove from teams_history (the run tally)
+    if team_id_to_delete in teams_history:
+        del teams_history[team_id_to_delete]
+        deleted_from_history = True
+    
+    # 2. Remove all entries from the global queue list
+    # Use a list comprehension to rebuild the queue without the deleted team
+    original_queue_length = len(queue)
+    queue = [item for item in queue if item['team_id'] != team_id_to_delete]
+    deleted_from_queue_count = original_queue_length - len(queue)
+    
+    # 3. Check and clear any active run slots
+    for slot_id, run_data in active_runs.items():
+        if run_data['team_id'] == team_id_to_delete:
+            active_runs[slot_id] = {
+                'team_id': None, 
+                'start_time': None, 
+                'status': 'IDLE', 
+                'time_paused_at': None, 
+                'time_remaining': None
+            }
+            
+    
+    if deleted_from_history or deleted_from_queue_count > 0:
+        flash(f'Team {team_id_to_delete} was completely deleted. History removed and {deleted_from_queue_count} queue/active entries cleared.', 'success')
+    else:
+        flash(f'Team {team_id_to_delete} not found in history or queue.', 'warning')
+        
+    return redirect(url_for('index'))
+
 # --- Settings ---
 
 @app.route('/set_run_time', methods=['POST'])
