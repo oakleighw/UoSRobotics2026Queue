@@ -210,6 +210,11 @@ def start_run():
         
     return redirect(url_for('index'))
 
+
+@app.route('/start_session', methods=['POST'])
+#If  waiting time > time left in session, block further queue adds or warn.
+
+
 @app.route('/pause_run', methods=['POST'])
 def pause_run():
     slot_id = int(request.form['slot_id'])
