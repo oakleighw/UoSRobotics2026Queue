@@ -4,7 +4,7 @@ Python
 
 ## Installation
 ```Bash
-pip install -r requirements.txt
+pip install flask
 ```
 
 ## Run
