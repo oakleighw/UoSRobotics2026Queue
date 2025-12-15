@@ -310,6 +310,70 @@
         {% endif %}
     </div>
 </div>
+</div>
+<section id="instructions" class="mt-12 p-6 bg-white card border-t-4 border-gray-300">
+            <h2 class="text-2xl font-bold mb-6 text-gray-700">💡 Instructions</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+
+                <div>
+                    <h3 class="text-xl font-semibold mb-3 text-indigo-600">1. Joining the Queue</h3>
+                    <ul class="list-disc list-inside text-gray-600 space-y-2">
+                        <li>Go to the <b>"➕ Join Queue"</b> card (Purple).</li>
+                        <li>Enter the team's ID (e.g., `1`, `B`, or `1B`).</li>
+                        <li>Click <b>"Add Team to Waitlist"</b>. The team will appear in the <b>Waiting Queue</b>.</li>
+                    </ul>
+                </div>
+
+                <div>
+                    <h3 class="text-xl font-semibold mb-3 text-indigo-600">2. Starting a Run</h3>
+                    <ul class="list-disc list-inside text-gray-600 space-y-2">
+                        <li>Locate an <b>IDLE</b> slot in the <b>"🤖 Arena Status"</b> section.</li>
+                        <li>If the <b>Waiting Queue</b> is not empty, a <b>"▶️ Start [Team ID]"</b> button will appear on the IDLE slot.</li>
+                        <li>Click <b>"Start"</b> to move the team at the front of the queue into that slot, beginning the timer.</li>
+                    </ul>
+                </div>
+
+                <div>
+                    <h3 class="text-xl font-semibold mb-3 text-indigo-600">3. Managing Active Runs</h3>
+                    <ul class="list-disc list-inside text-gray-600 space-y-2">
+                        <li><b>Pause/Resume:</b> Use the <b>⏸️</b> button to pause the timer, and the <b>▶️</b> button to resume.</li>
+                        <li><b>Mark Dysfunctional (⚠️):</b> Use this if a robot breaks or there's an immediate technical problem, sending the team to <b>Review</b> for a likely Priority Re-run.</li>
+                        <li><b>End Run (❌):</b> Use this when the run is complete or manually terminated. This sends the team to the <b>Review Queue</b>.</li>
+                    </ul>
+                </div>
+
+                <div>
+                    <h3 class="text-xl font-semibold mb-3 text-indigo-600">4. Processing the Review Queue</h3>
+                    <p class="text-gray-600 mb-2">After a run ends or is marked dysfunctional and cancelled, it moves to the <b>Review Queue</b>.</p>
+                    <ul class="list-disc list-inside text-gray-600 space-y-2">
+                        <li><b>SUCCESS:</b> Team completed the run successfully. Removes team from review and increments their count in the <b>Tally</b>.</li>
+                        <li><b>FAILURE:</b> Marks a run as a technical failure (e.g., code won't run at all). Removes team from review, <b>doesn't</b> increment their Tally count, and sets a <b>Priority Re-run</b> flag in the next queue entry.</li>
+                        <li><b>CANCELED:</b> Run was cancelled by the team/operator (e.g., they didn't show up). Removes the team entirely from the queue/review without incrementing the <b>Tally</b>.</li>
+                    </ul>
+                </div>
+
+                <div>
+                    <h3 class="text-xl font-semibold mb-3 text-indigo-600">5. Team Runs Tally</h3>
+                    <ul class="list-disc list-inside text-gray-600 space-y-2">
+                        <li>Shows the total number of <b>Successful</b> runs completed by each team.</li>
+                        <li>Use the search bar to filter for specific teams.</li>
+                        <li><b>Re-add (🔄):</b> Adds a team back to the <b>Waiting Queue</b> for another run (don't have to enter manually).</li>
+                        <li><b>Delete (🗑️):</b> Permanently deletes the team and all run history (use with caution).</li>
+                    </ul>
+                </div>
+
+                <div>
+                    <h3 class="text-xl font-semibold mb-3 text-indigo-600">6. Settings</h3>
+                    <ul class="list-disc list-inside text-gray-600 space-y-2">
+                        <li><b>Set Run Time:</b> Change the standard length of time (in minutes) for a robot run.</li>
+                        <li><b>Team Name Prefix:</b> Change the display prefix for all teams (e.g., change from "Team _" to "Group _").</li>
+                    </ul>
+                </div>
+
+            </div>
+        </section>
+
+        <hr class="my-8">
 
         <script>
             // Confirmation function for actions
