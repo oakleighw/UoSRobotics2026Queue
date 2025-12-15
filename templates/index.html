@@ -336,8 +336,8 @@
                     } else if (seconds <= 0) {
                         timerElement.innerHTML = `00:00`;
                         if (status === 'RUNNING') {
-                            // Optional: Reload the page when a run times out to refresh the queue/review status
-                            // window.location.reload(); 
+                            // Reload the page when a run times out to refresh the queue/review status
+                            window.location.reload(); 
                         }
                     }
                 });
