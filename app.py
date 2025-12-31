@@ -72,6 +72,38 @@ def format_seconds(seconds):
     seconds = int(seconds % 60)
     return f"{minutes:02d}:{seconds:02d}"
 
+
+def is_queue_full():
+    """Returns True if adding one more team would exceed the session time."""
+    if session_end_time is None:
+        return False # Or True, depending on if you want to block entries when no timer exists
+
+    now = time.time()
+    session_left = session_end_time - now
+    
+    # 1. Get remaining time for robots in slots
+    slot_finish_times = []
+    for slot_id in range(1, 5):
+        data = active_runs.get(slot_id)
+        if data and data['status'] in ('RUNNING', 'PAUSED', 'DYSFUNCTIONAL'):
+            slot_finish_times.append(get_time_remaining(data))
+        else:
+            slot_finish_times.append(0)
+
+    # 2. Add time for WAITING teams AND REVIEW teams (Review teams might fail/re-run)
+    # We include REVIEW teams to be safe/conservative with session time
+    backlog_teams = [t for t in queue if t['status'] in ('WAITING', 'REVIEW')]
+    
+    for _ in backlog_teams:
+        slot_finish_times.sort()
+        slot_finish_times[0] += RUN_TIME_SECONDS
+        
+    # 3. Simulate adding the NEW team
+    slot_finish_times.sort()
+    earliest_finish_with_new_team = slot_finish_times[0] + RUN_TIME_SECONDS
+
+    return earliest_finish_with_new_team > session_left
+
 # --- NEW PRIORITY SORTING FUNCTION ---
 
 def sort_waiting_queue_priority(queue_list, history):
@@ -161,6 +193,23 @@ def index():
     # 3. Get the *actual* next team object for the idle slot buttons
     next_waiting_team = next((team for team in display_queue if team['team_id'] == next_waiting_team_id), None)
 
+
+    # Calculate Queue Load for the Progress Bar
+    # We'll see how many teams we could POSSIBLY fit in the remaining time
+    # versus how many we have.
+    now = time.time()
+    session_left = session_end_time - now if session_end_time else 0
+    
+    # Simple capacity for the visual bar:
+    # (Remaining Session Time / Run Time) * 4 Arenas
+    total_potential_slots = int((max(0, session_left) / RUN_TIME_SECONDS) * 4)
+    
+    # Current Load = Active + Waiting + Review
+    active_count = sum(1 for s in active_runs.values() if s['team_id'])
+    waiting_count = sum(1 for t in queue if t['status'] == 'WAITING')
+    review_count = sum(1 for t in queue if t['status'] == 'REVIEW')
+    current_load = active_count + waiting_count + review_count
+
     return render_template('index.html', 
                            queue=display_queue, # Use the sorted list for display
                            active_runs_display=active_runs_display, 
@@ -169,48 +218,54 @@ def index():
                            teams_history=teams_history,
                            TEAM_PREFIX=TEAM_PREFIX,
                            session_time_remaining=session_rem,
-                           session_active=(session_end_time is not None),)
+                           session_active=(session_end_time is not None),
+                           total_potential_slots=total_potential_slots,
+                           current_load=current_load,
+                           is_full=is_queue_full())
 
 @app.route('/join_queue', methods=['POST'])
 def join_queue():
-
-    # Get the raw input (e.g., '1', 'B', '1B')
     raw_team_id = request.form['team_id'].upper().strip()
 
-    # Validation Logic
-    # Regex for: 1 to 4 alphanumeric characters (A-Z or 0-9)
-    # The team_id must be 1, 2, 3, or 4 characters.
-    
-    # Only allow 1-4 alphanumeric characters
+    # 1. Validation
     if not re.fullmatch(r'^[A-Z0-9]{1,4}$', raw_team_id):
-        flash('Invalid Team ID. Must be 1 to 4 characters long and contain only letters or numbers (e.g., "1", "B", "1B", "100B").', 'error')
+        flash('Invalid Team ID. Use 1-4 letters/numbers.', 'error')
         return redirect(url_for('index'))
 
-    # 2. Apply the Global Prefix
     team_id = f"{TEAM_PREFIX}{raw_team_id}"
-    
-    if not team_id:
-        flash('Team ID cannot be empty.', 'error')
+
+    # 2. Check for Duplicates
+    if any(item['team_id'] == team_id and item['status'] in ('WAITING', 'RUNNING', 'PAUSED') for item in queue):
+        flash(f'{team_id} is already in the queue!', 'warning')
         return redirect(url_for('index'))
-        
-    # Check if the team is already running or waiting
-    if any(item['team_id'] == team_id and item['status'] in ('WAITING', 'RUNNING') for item in queue):
-        flash(f'{team_id} is already in the queue or currently running.', 'warning')
+
+    # 3. Session Check
+    if session_end_time is None:
+        flash('🚫 <strong>Session Not Started:</strong> Please set the timer first.', 'error')
+        return redirect(url_for('index'))
+
+    # 4. Queue Full Check (Sync with Parallel Logic)
+    if is_queue_full():
+        session_left = session_end_time - time.time()
+        mins_left = int(session_left // 60)
+        flash(f'🚫 <strong>Queue Full:</strong> Only approx {mins_left} mins left. This team wouldn’t finish in time.', 'error')
         return redirect(url_for('index'))
     
-    # Initialize run count
+    # 5. Team shows up in the Tally list immediately
     if team_id not in teams_history:
         teams_history[team_id] = 0
-    
-    # Add new team to the queue with default status
+
+    # 6. Add to Queue
     queue.append({
         'team_id': team_id,
         'status': 'WAITING',
-        'priority_re_run': False, # New teams start with no priority
+        'priority_re_run': False,
         'time_added': time.time()
     })
-    flash(f'{team_id} added to the waiting queue.', 'success')
+    flash(f'{team_id} added successfully!', 'success')
     return redirect(url_for('index'))
+
+    
 
 
 @app.route('/remove_from_queue', methods=['POST'])
@@ -444,6 +499,10 @@ def re_add_to_queue():
     # Check if the team is in the review queue and prevent adding
     if any(item['team_id'] == team_id and item['status'] == 'REVIEW' for item in queue):
         flash(f'Team {team_id} is in the REVIEW Queue and must be resolved before being re-added.', 'warning')
+        return redirect(url_for('index'))
+    
+    if is_queue_full():
+        flash(f'🚫 <strong>Queue Full:</strong> Cannot re-add {team_id}. No time left in session.', 'error')
         return redirect(url_for('index'))
     
     # The team already exists in teams_history, so we don't need to initialize the count.

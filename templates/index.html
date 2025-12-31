@@ -43,18 +43,19 @@
 
             <p class="text-gray-500 mt-2">Manage team runs and status for 4 concurrent arena slots.</p>
         </header>
-        {% with messages = get_flashed_messages(with_categories=true) %}
-            {% if messages %}
-                <div class="mb-4 space-y-2">
-                {% for category, message in messages %}
-                    {% set bg_color = {'success': 'bg-green-100 border-green-400 text-green-700', 'warning': 'bg-yellow-100 border-yellow-400 text-yellow-700', 'error': 'bg-red-100 border-red-400 text-red-700'} %}
-                    <div class="p-3 border rounded-lg {{ bg_color.get(category, 'bg-gray-100 border-gray-400 text-gray-700') }}" role="alert">
-                        <span class="font-medium">{{ message | safe }}</span>
-                    </div>
-                {% endfor %}
+       {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            <div class="mb-6 space-y-3">
+            {% for category, message in messages %}
+                {% set bg = 'bg-red-500' if category == 'error' else 'bg-yellow-500' if category == 'warning' else 'bg-indigo-600' %}
+                <div class="{{ bg }} text-white p-4 rounded-xl shadow-lg flex justify-between items-center animate-bounce-short" role="alert">
+                    <span class="font-bold">{{ message | safe }}</span>
+                    <button onclick="this.parentElement.remove()" class="text-white hover:text-gray-200 text-xl font-bold px-2">&times;</button>
                 </div>
-            {% endif %}
-        {% endwith %}
+            {% endfor %}
+            </div>
+        {% endif %}
+{% endwith %}
 
         <section id="main-content-row" class="grid grid-cols-1 lg:grid-cols-12 gap-8 mb-8">
         
@@ -193,16 +194,46 @@
 
             <div id="waiting-queue-col" class="lg:col-span-4 card bg-white p-6 border-l-4 border-indigo-500">
                 <h2 class="text-xl font-bold mb-4 text-indigo-600">Waiting Queue <span class="text-sm font-normal">({{ queue|selectattr('status', 'equalto', 'WAITING')|list|length }})</span></h2>
-                <h3>Session time remaining</h3>
-                <div id="session-timer" 
-                    class="text-2xl font-mono font-bold text-indigo-600"
-                    data-remaining="{{ session_time_remaining }}">
-                    {% if session_time_remaining > 0 %}
-                        Calculating...
-                    {% else %}
-                        00:00:00
-                    {% endif %}
-                </div>
+                  <!-- SESSION TIMER BOX -->
+<div class="mb-6 p-4 bg-indigo-50 rounded-xl border border-indigo-100 shadow-sm flex flex-col items-center">
+    <span class="text-xs font-bold text-indigo-400 uppercase tracking-widest mb-1">Session Time Remaining</span>
+    
+    <div id="session-timer" class="text-3xl font-mono font-black text-indigo-700" data-remaining="{{ session_time_remaining or 0 }}">
+        {% if session_time_remaining and session_time_remaining > 0 %}
+            --:--:--
+        {% else %}
+            OFFLINE
+        {% endif %}
+    </div>
+    
+{% if session_time_remaining and session_time_remaining > 0 %}
+    {% set percent_full = (current_load / total_potential_slots * 100) | round | int if total_potential_slots > 0 else 100 %}
+    {% set bar_width = [percent_full, 100] | min %}
+
+    <div class="w-full mt-3">
+        <div class="flex justify-between text-[10px] font-bold uppercase mb-1">
+            <span class="text-indigo-500">Queue Load ({{ current_load }}/{{ total_potential_slots }} runs possible)</span>
+            <span class="{{ 'text-red-500' if is_full else 'text-indigo-500' }}">
+                {{ percent_full }}%
+            </span>
+        </div>
+        
+        <div class="w-full bg-indigo-200 rounded-full h-1.5 overflow-hidden">
+            <div class="h-1.5 rounded-full transition-all duration-500 {{ 'bg-red-500' if is_full else 'bg-indigo-500' }}" 
+                 style="--bar-width: {{ bar_width }}%; width: var(--bar-width);">
+            </div>
+        </div>
+
+        {% if is_full %}
+            <p class="text-[9px] text-red-500 font-bold mt-1 text-center animate-pulse tracking-tighter">
+                🚫 NO MORE TEAMS: REMAINING TIME IS FULL
+            </p>
+        {% endif %}
+    </div>
+{% endif %}
+        
+</div>
+  
                 {% set waiting_teams = queue|selectattr('status', 'equalto', 'WAITING')|list %}
 
                 <div class="h-96 overflow-y-auto space-y-3">
