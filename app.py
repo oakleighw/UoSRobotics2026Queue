@@ -14,6 +14,10 @@ active_runs = {
     3: {'team_id': None, 'start_time': None, 'status': 'IDLE', 'time_paused_at': None, 'time_remaining': None},
     4: {'team_id': None, 'start_time': None, 'status': 'IDLE', 'time_paused_at': None, 'time_remaining': None},
 }
+
+# Global session time
+session_end_time = None  # Stores the Unix timestamp when the session ends
+
 # Default run time is 5 minutes (300 seconds)
 RUN_TIME_SECONDS = 300 
 teams_history = {} # {'TEAM_A': 2, 'TEAM_B': 1}
@@ -21,6 +25,13 @@ teams_history = {} # {'TEAM_A': 2, 'TEAM_B': 1}
 TEAM_PREFIX = "Team " # Default Prefix
 
 # --- Helper Functions for Time and Display ---
+
+# Helper for Session Time
+def get_session_remaining():
+    if session_end_time is None:
+        return 0
+    remaining = max(0, session_end_time - time.time())
+    return int(remaining)
 
 def get_time_remaining(run_data):
     """Calculates the time remaining for a run."""
@@ -118,8 +129,10 @@ def get_next_team_in_queue():
 @app.route('/')
 def index():
     # 1. Update/Clean up active runs and calculate remaining time
+    session_rem = get_session_remaining()
     active_runs_display = {}
     next_waiting_team_id = get_next_team_in_queue()
+    
 
     for slot_id, data in active_runs.items():
         if data['status'] != 'IDLE':
@@ -154,7 +167,9 @@ def index():
                            next_waiting_team=next_waiting_team, # This is used by the IDLE slot button
                            RUN_TIME_SECONDS=RUN_TIME_SECONDS,
                            teams_history=teams_history,
-                           TEAM_PREFIX=TEAM_PREFIX)
+                           TEAM_PREFIX=TEAM_PREFIX,
+                           session_time_remaining=session_rem,
+                           session_active=(session_end_time is not None),)
 
 @app.route('/join_queue', methods=['POST'])
 def join_queue():
@@ -256,6 +271,19 @@ def start_run():
 
 @app.route('/start_session', methods=['POST'])
 #If  waiting time > time left in session, block further queue adds or warn.
+def start_session():
+    global session_end_time
+    try:
+        minutes = int(request.form['session_minutes'])
+        if minutes <= 0:
+            session_end_time = None # Clear session
+            flash('Session timer cleared.', 'info')
+        else:
+            session_end_time = time.time() + (minutes * 60)
+            flash(f'Session started for {minutes} minutes.', 'success')
+    except ValueError:
+        flash('Invalid session time.', 'error')
+    return redirect(url_for('index'))
 
 
 @app.route('/pause_run', methods=['POST'])

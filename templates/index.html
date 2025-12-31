@@ -193,7 +193,16 @@
 
             <div id="waiting-queue-col" class="lg:col-span-4 card bg-white p-6 border-l-4 border-indigo-500">
                 <h2 class="text-xl font-bold mb-4 text-indigo-600">Waiting Queue <span class="text-sm font-normal">({{ queue|selectattr('status', 'equalto', 'WAITING')|list|length }})</span></h2>
-                
+                <h3>Session time remaining</h3>
+                <div id="session-timer" 
+                    class="text-2xl font-mono font-bold text-indigo-600"
+                    data-remaining="{{ session_time_remaining }}">
+                    {% if session_time_remaining > 0 %}
+                        Calculating...
+                    {% else %}
+                        00:00:00
+                    {% endif %}
+                </div>
                 {% set waiting_teams = queue|selectattr('status', 'equalto', 'WAITING')|list %}
 
                 <div class="h-96 overflow-y-auto space-y-3">
@@ -241,9 +250,18 @@
             
         <div id="settings-col" class="lg:col-span-1 space-y-8">
     <h2 class="text-2xl font-bold mb-4 text-gray-700">⚙️ Settings</h2>
-
     <div class="card bg-gray-50 p-6 border-l-4 border-gray-400 space-y-4">
-        <h3 class="text-xl font-bold text-gray-700">Set Run Time</h3>
+            <h2 class="text-xl font-bold mb-4">Session Time Limit</h2>
+    <form action="{{ url_for('start_session') }}" method="POST" class="flex items-center space-x-4">
+        <div>
+            <label class="block text-sm font-medium text-gray-700">Session Duration (minutes)</label>
+            <input type="number" name="session_minutes" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2" placeholder="e.g. 120">
+        </div>
+        <button type="submit" class="mt-6 bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700">
+            Start Session
+        </button>
+    </form>
+        <h3 class="text-xl font-bold text-gray-700">Set Individual Run Time</h3>
         <p class="text-sm text-gray-500">Current Run Time: <span class="font-bold text-gray-700">{{ (RUN_TIME_SECONDS / 60) | int }} minutes</span></p>
         <form action="{{ url_for('set_run_time') }}" method="post" class="flex space-x-2">
             <input type="number" name="run_time_minutes" min="1" value="{{ (RUN_TIME_SECONDS / 60) | int }}" required 
@@ -316,7 +334,16 @@
             <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
 
                 <div>
-                    <h3 class="text-xl font-semibold mb-3 text-indigo-600">1. Joining the Queue</h3>
+                    <h3 class="text-xl font-semibold mb-3 text-indigo-600">1. Settings</h3>
+                    <ul class="list-disc list-inside text-gray-600 space-y-2">
+                        <li><b>Set Session Time Limit:</b> Change the duration remaining (in minutes) for a robotics session. Effects waiting queue limits at reduced times.</li>
+                        <li><b>Set Run Time:</b> Change the standard length of time (in minutes) for a robot run.</li>
+                        <li><b>Team Name Prefix:</b> Change the display prefix for all teams (e.g., change from "Team _" to "Group _").</li>
+                    </ul>
+                </div>
+
+                <div>
+                    <h3 class="text-xl font-semibold mb-3 text-indigo-600">2. Joining the Queue</h3>
                     <ul class="list-disc list-inside text-gray-600 space-y-2">
                         <li>Go to the <b>"➕ Join Queue"</b> card (Purple).</li>
                         <li>Enter the team's ID (e.g., `1`, `B`, or `1B`).</li>
@@ -325,7 +352,7 @@
                 </div>
 
                 <div>
-                    <h3 class="text-xl font-semibold mb-3 text-indigo-600">2. Starting a Run</h3>
+                    <h3 class="text-xl font-semibold mb-3 text-indigo-600">3. Starting a Run</h3>
                     <ul class="list-disc list-inside text-gray-600 space-y-2">
                         <li>Locate an <b>IDLE</b> slot in the <b>"🤖 Arena Status"</b> section.</li>
                         <li>If the <b>Waiting Queue</b> is not empty, a <b>"▶️ Start [Team ID]"</b> button will appear on the IDLE slot.</li>
@@ -334,7 +361,7 @@
                 </div>
 
                 <div>
-                    <h3 class="text-xl font-semibold mb-3 text-indigo-600">3. Managing Active Runs</h3>
+                    <h3 class="text-xl font-semibold mb-3 text-indigo-600">4. Managing Active Runs</h3>
                     <ul class="list-disc list-inside text-gray-600 space-y-2">
                         <li><b>Pause/Resume:</b> Use the <b>⏸️</b> button to pause the timer, and the <b>▶️</b> button to resume.</li>
                         <li><b>Mark Dysfunctional (⚠️):</b> Use this if a robot breaks or there's an immediate technical problem, sending the team to <b>Review</b> for a likely Priority Re-run.</li>
@@ -343,7 +370,7 @@
                 </div>
 
                 <div>
-                    <h3 class="text-xl font-semibold mb-3 text-indigo-600">4. Processing the Review Queue</h3>
+                    <h3 class="text-xl font-semibold mb-3 text-indigo-600">5. Processing the Review Queue</h3>
                     <p class="text-gray-600 mb-2">After a run ends or is marked dysfunctional and cancelled, it moves to the <b>Review Queue</b>.</p>
                     <ul class="list-disc list-inside text-gray-600 space-y-2">
                         <li><b>SUCCESS:</b> Team completed the run successfully. Removes team from review and increments their count in the <b>Tally</b>.</li>
@@ -353,7 +380,7 @@
                 </div>
 
                 <div>
-                    <h3 class="text-xl font-semibold mb-3 text-indigo-600">5. Team Runs Tally</h3>
+                    <h3 class="text-xl font-semibold mb-3 text-indigo-600">6. Team Runs Tally</h3>
                     <ul class="list-disc list-inside text-gray-600 space-y-2">
                         <li>Shows the total number of <b>Successful</b> runs completed by each team.</li>
                         <li>Use the search bar to filter for specific teams.</li>
@@ -362,13 +389,7 @@
                     </ul>
                 </div>
 
-                <div>
-                    <h3 class="text-xl font-semibold mb-3 text-indigo-600">6. Settings</h3>
-                    <ul class="list-disc list-inside text-gray-600 space-y-2">
-                        <li><b>Set Run Time:</b> Change the standard length of time (in minutes) for a robot run.</li>
-                        <li><b>Team Name Prefix:</b> Change the display prefix for all teams (e.g., change from "Team _" to "Group _").</li>
-                    </ul>
-                </div>
+
 
             </div>
         </section>
@@ -389,6 +410,23 @@
             }
 
             function updateTimers() {
+            // Update Session Timer
+                const sessionElem = document.getElementById('session-timer');
+                if (sessionElem) {
+                    let rem = parseInt(sessionElem.getAttribute('data-remaining'));
+                    if (rem > 0) {
+                        rem -= 1;
+                        sessionElem.setAttribute('data-remaining', rem);
+                        sessionElem.innerText = formatTime(rem);
+                        
+                        // Visual warning when low
+                        if (rem < 300) sessionElem.classList.add('text-red-500');
+                    } else {
+                        sessionElem.innerText = "00:00";
+                    }
+                }
+
+                // Update Arena Slot Timers
                 document.querySelectorAll('[data-seconds-remaining]').forEach(timerElement => {
                     let seconds = parseInt(timerElement.getAttribute('data-seconds-remaining'));
                     const status = timerElement.getAttribute('data-status');
