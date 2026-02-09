@@ -8,26 +8,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" integrity="sha512-SnH5WK+bZxgPHs44uWIX+LLJAJ9/2PKPKZ5QiAj6Ta86w+fsb2TkcmfRyVX3pBnMFcV7oQyQ5pZB5V7FNFk5uA==" crossorigin="anonymous" referrerpolicy="no-referrer" />
     
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
-    <style>
-        body {
-            font-family: 'Inter', sans-serif;
-            background-color: #f7f7f7;
-        }
-        .card {
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-            border-radius: 12px;
-        }
-        /* Custom styles for slots based on status */
-        .slot-card {
-            padding: 1.5rem;
-            border-left: 5px solid;
-            transition: all 0.3s;
-        }
-        .slot-running { border-color: #10B981; background-color: #ECFDF5; } 
-        .slot-paused { border-color: #FBBF24; background-color: #FFFBEB; } 
-        .slot-dysfunctional { border-color: #EF4444; background-color: #FEF2F2; } 
-        .slot-idle { border-color: #9CA3AF; background-color: #F9FAFB; } 
-    </style>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
 </head>
 <body class="min-h-screen p-4 sm:p-8">
 
@@ -70,7 +51,7 @@
                             
                             {% if data.slot_data.team_id %}
                                 <p class="text-lg font-semibold text-gray-700">Team Running:</p>
-                                <p class="text-3xl font-extrabold text-indigo-800 mb-2">{{ data.slot_data.team_id }}</p>
+                                <p class="text-3xl font-extrabold text-indigo-800 mb-2 team-name">{{ data.slot_data.team_id }}</p>
                                 
                                 <p class="text-md font-semibold text-gray-700">Time Remaining:</p>
                                 <p id="timer-{{ slot_id }}" 
@@ -439,80 +420,7 @@
 
         <hr class="my-8">
 
-        <script>
-            // Confirmation function for actions
-            function confirmAction(action, message) {
-                return confirm(message);
-            }
-
-            // Timer Logic (Keep your existing timer logic here)
-            function formatTime(seconds) {
-                const minutes = Math.floor(seconds / 60);
-                const remainingSeconds = Math.floor(seconds % 60);
-                return `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
-            }
-
-            function updateTimers() {
-            // Update Session Timer
-                const sessionElem = document.getElementById('session-timer');
-                if (sessionElem) {
-                    let rem = parseInt(sessionElem.getAttribute('data-remaining'));
-                    if (rem > 0) {
-                        rem -= 1;
-                        sessionElem.setAttribute('data-remaining', rem);
-                        sessionElem.innerText = formatTime(rem);
-                        
-                        // Visual warning when low
-                        if (rem < 300) sessionElem.classList.add('text-red-500');
-                    } else {
-                        sessionElem.innerText = "00:00";
-                    }
-                }
-
-                // Update Arena Slot Timers
-                document.querySelectorAll('[data-seconds-remaining]').forEach(timerElement => {
-                    let seconds = parseInt(timerElement.getAttribute('data-seconds-remaining'));
-                    const status = timerElement.getAttribute('data-status');
-                    
-                    if (status === 'RUNNING' && seconds > 0) {
-                        seconds--;
-                        timerElement.setAttribute('data-seconds-remaining', seconds);
-                        timerElement.innerHTML = `${formatTime(seconds)}`;
-                    } else if (seconds <= 0) {
-                        timerElement.innerHTML = `00:00`;
-                        if (status === 'RUNNING') {
-                            // Reload the page when a run times out to refresh the queue/review status
-                            window.location.reload(); 
-                        }
-                    }
-                });
-            }
-
-        function filterTally() {
-        const input = document.getElementById('tally-search');
-        const filter = input.value.toUpperCase();
-
-        // 1. Filter Team Runs Tally
-        const tallyList = document.querySelector('.tally-list');
-        if (tallyList) {
-            const tallyItems = tallyList.querySelectorAll('.flex.justify-between.items-center');
-            tallyItems.forEach(item => {
-                const teamIdElement = item.querySelector('span.font-semibold.text-gray-800');
-                if (teamIdElement) {
-                    const teamId = teamIdElement.textContent || teamIdElement.innerText;
-                    if (teamId.toUpperCase().indexOf(filter) > -1) {
-                        item.style.display = "flex";
-                    } else {
-                        item.style.display = "none";
-                    }
-                }
-            });
-        }
-    }
-
-            // Update timers every second
-            setInterval(updateTimers, 1000);
-        </script>
+        <script src="{{ url_for('static', filename='js/app.js') }}" defer></script>
 
 </body>
 </html>

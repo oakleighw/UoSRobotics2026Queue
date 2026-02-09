@@ -1,0 +1,42 @@
+body {
+    font-family: 'Inter', sans-serif;
+    background-color: #f7f7f7;
+}
+
+.card {
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    border-radius: 12px;
+}
+
+/* Custom styles for slots based on status */
+.slot-card {
+    padding: 1.5rem;
+    border-left: 5px solid;
+    transition: all 0.3s;
+}
+
+.slot-running {
+    border-color: #10B981;
+    background-color: #ECFDF5;
+}
+
+.slot-paused {
+    border-color: #FBBF24;
+    background-color: #FFFBEB;
+}
+
+.slot-dysfunctional {
+    border-color: #EF4444;
+    background-color: #FEF2F2;
+}
+
+.slot-idle {
+    border-color: #9CA3AF;
+    background-color: #F9FAFB;
+}
+
+.team-name {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    white-space: normal;
+}
