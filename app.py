@@ -78,6 +78,13 @@ def is_queue_full():
     if session_end_time is None:
         return False # Or True, depending on if you want to block entries when no timer exists
 
+    return get_additional_capacity() < 1
+
+def get_additional_capacity():
+    """Returns how many MORE teams can be added and still finish within the session."""
+    if session_end_time is None:
+        return 0
+
     now = time.time()
     session_left = session_end_time - now
     
@@ -93,16 +100,20 @@ def is_queue_full():
     # 2. Add time for WAITING teams AND REVIEW teams (Review teams might fail/re-run)
     # We include REVIEW teams to be safe/conservative with session time
     backlog_teams = [t for t in queue if t['status'] in ('WAITING', 'REVIEW')]
-    
+
     for _ in backlog_teams:
         slot_finish_times.sort()
         slot_finish_times[0] += RUN_TIME_SECONDS
-        
-    # 3. Simulate adding the NEW team
-    slot_finish_times.sort()
-    earliest_finish_with_new_team = slot_finish_times[0] + RUN_TIME_SECONDS
 
-    return earliest_finish_with_new_team > session_left
+    # 3. Count how many additional runs can still fit
+    additional_capacity = 0
+    slot_finish_times.sort()
+    while slot_finish_times and (slot_finish_times[0] + RUN_TIME_SECONDS) <= session_left:
+        slot_finish_times[0] += RUN_TIME_SECONDS
+        additional_capacity += 1
+        slot_finish_times.sort()
+
+    return additional_capacity
 
 # --- NEW PRIORITY SORTING FUNCTION ---
 
@@ -195,20 +206,15 @@ def index():
 
 
     # Calculate Queue Load for the Progress Bar
-    # We'll see how many teams we could POSSIBLY fit in the remaining time
-    # versus how many we have.
-    now = time.time()
-    session_left = session_end_time - now if session_end_time else 0
-    
-    # Simple capacity for the visual bar:
-    # (Remaining Session Time / Run Time) * 4 Arenas
-    total_potential_slots = int((max(0, session_left) / RUN_TIME_SECONDS) * 4)
+    # Use the same capacity logic as queue-full checks for consistency.
+    additional_capacity = get_additional_capacity() if session_end_time else 0
     
     # Current Load = Active + Waiting + Review
     active_count = sum(1 for s in active_runs.values() if s['team_id'])
     waiting_count = sum(1 for t in queue if t['status'] == 'WAITING')
     review_count = sum(1 for t in queue if t['status'] == 'REVIEW')
     current_load = active_count + waiting_count + review_count
+    total_potential_slots = current_load + additional_capacity
 
     return render_template('index.html', 
                            queue=display_queue, # Use the sorted list for display
