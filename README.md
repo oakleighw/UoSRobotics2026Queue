@@ -39,7 +39,7 @@ python app.py
 Set these in your host environment (for PythonAnywhere, add them in your web app config / WSGI setup):
 
 ```Bash
-FLASK_SECRET_KEY= ""
+FLASK_SECRET_KEY=""
 QUEUE_AUTH_USERNAME=""
 QUEUE_AUTH_PASSWORD=""
 ```
