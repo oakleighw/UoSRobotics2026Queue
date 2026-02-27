@@ -8,6 +8,8 @@ const AUTH_CONFIG = {
     logoutEndpoint: '/auth/logout'
 };
 
+let serverClockOffsetSeconds = 0;
+
 function initializeInteractionGate() {
     const overlay = document.getElementById('auth-overlay');
     const appRoot = document.getElementById('app-root');
@@ -138,40 +140,84 @@ function formatTime(seconds) {
     return `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
 }
 
+function getServerNowSeconds() {
+    return (Date.now() / 1000) + serverClockOffsetSeconds;
+}
+
 function updateTimers() {
     // Update Session Timer
     const sessionElem = document.getElementById('session-timer');
     if (sessionElem) {
-        let rem = parseInt(sessionElem.getAttribute('data-remaining'));
-        if (rem > 0) {
-            rem -= 1;
-            sessionElem.setAttribute('data-remaining', rem);
+        const sessionEndTs = parseFloat(sessionElem.getAttribute('data-session-end-ts') || '0');
+        if (sessionEndTs > 0) {
+            const rem = Math.max(0, Math.floor(sessionEndTs - getServerNowSeconds()));
             sessionElem.innerText = formatTime(rem);
 
-            // Visual warning when low
-            if (rem < 300) sessionElem.classList.add('text-red-500');
+            if (rem < 300) {
+                sessionElem.classList.add('text-red-500');
+            } else {
+                sessionElem.classList.remove('text-red-500');
+            }
         } else {
-            sessionElem.innerText = "00:00";
+            sessionElem.innerText = 'OFFLINE';
+            sessionElem.classList.remove('text-red-500');
         }
     }
 
     // Update Arena Slot Timers
     document.querySelectorAll('[data-seconds-remaining]').forEach(timerElement => {
-        let seconds = parseInt(timerElement.getAttribute('data-seconds-remaining'));
+        let seconds = parseInt(timerElement.getAttribute('data-seconds-remaining') || '0');
         const status = timerElement.getAttribute('data-status');
 
-        if (status === 'RUNNING' && seconds > 0) {
-            seconds--;
-            timerElement.setAttribute('data-seconds-remaining', seconds);
+        if (status === 'RUNNING') {
+            const endTs = parseFloat(timerElement.getAttribute('data-end-ts') || '0');
+            if (endTs > 0) {
+                seconds = Math.max(0, Math.floor(endTs - getServerNowSeconds()));
+                timerElement.setAttribute('data-seconds-remaining', seconds);
+            }
+
             timerElement.innerHTML = `${formatTime(seconds)}`;
-        } else if (seconds <= 0) {
-            timerElement.innerHTML = `00:00`;
-            if (status === 'RUNNING') {
-                // Reload the page when a run times out to refresh the queue/review status
+
+            if (seconds <= 0) {
                 window.location.reload();
             }
+        } else if (seconds <= 0) {
+            timerElement.innerHTML = `00:00`;
         }
     });
+}
+
+function initializeStatePolling() {
+    const appRoot = document.getElementById('app-root');
+    if (!appRoot) {
+        return;
+    }
+
+    const initialServerNow = parseFloat(appRoot.getAttribute('data-server-now') || '0');
+    if (initialServerNow > 0) {
+        serverClockOffsetSeconds = initialServerNow - (Date.now() / 1000);
+    }
+
+    let lastStateSignature = appRoot.getAttribute('data-state-signature') || '';
+
+    setInterval(async () => {
+        try {
+            const response = await fetch('/state_version', { cache: 'no-store' });
+            if (!response.ok) {
+                return;
+            }
+
+            const data = await response.json();
+            if (typeof data.server_now === 'number') {
+                serverClockOffsetSeconds = data.server_now - (Date.now() / 1000);
+            }
+
+            if (data.state_signature && data.state_signature !== lastStateSignature) {
+                window.location.reload();
+            }
+        } catch (error) {
+        }
+    }, 2000);
 }
 
 function filterTally() {
@@ -197,6 +243,8 @@ function filterTally() {
 }
 
 initializeInteractionGate();
+initializeStatePolling();
 
 // Update timers every second
 setInterval(updateTimers, 1000);
+updateTimers();

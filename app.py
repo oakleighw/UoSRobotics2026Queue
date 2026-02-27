@@ -2,6 +2,8 @@ from flask import Flask, render_template, request, redirect, url_for, flash, ses
 import time
 import re
 import os
+import json
+import hashlib
 from datetime import datetime, timedelta
 
 app = Flask(__name__)
@@ -172,6 +174,19 @@ def get_next_team_in_queue():
         return sorted_waiting[0]['team_id']
     return None
 
+
+def build_state_signature():
+    snapshot = {
+        'queue': queue,
+        'active_runs': active_runs,
+        'session_end_time': session_end_time,
+        'run_time_seconds': RUN_TIME_SECONDS,
+        'teams_history': teams_history,
+        'team_prefix': TEAM_PREFIX,
+    }
+    serialized = json.dumps(snapshot, sort_keys=True, separators=(',', ':'))
+    return hashlib.sha256(serialized.encode('utf-8')).hexdigest()
+
 # --- Flask Routes ---
 
 @app.before_request
@@ -210,6 +225,14 @@ def auth_login():
 def auth_logout():
     session.pop(AUTH_SESSION_KEY, None)
     return jsonify({'ok': True})
+
+
+@app.route('/state_version', methods=['GET'])
+def state_version():
+    return jsonify({
+        'state_signature': build_state_signature(),
+        'server_now': time.time()
+    })
 
 @app.route('/')
 def index():
@@ -257,6 +280,7 @@ def index():
     review_count = sum(1 for t in queue if t['status'] == 'REVIEW')
     current_load = active_count + waiting_count + review_count
     total_potential_slots = current_load + additional_capacity
+    server_now = time.time()
 
     return render_template('index.html', 
                            queue=display_queue, # Use the sorted list for display
@@ -266,6 +290,9 @@ def index():
                            teams_history=teams_history,
                            TEAM_PREFIX=TEAM_PREFIX,
                            controls_unlocked=bool(session.get(AUTH_SESSION_KEY)),
+                           state_signature=build_state_signature(),
+                           server_now=server_now,
+                           session_end_ts=(session_end_time if session_end_time is not None else 0),
                            session_time_remaining=session_rem,
                            session_active=(session_end_time is not None),
                            total_potential_slots=total_potential_slots,

@@ -38,7 +38,7 @@
         {{ 'Logout' if controls_unlocked else 'Login' }}
     </button>
 
-    <div id="app-root" class="max-w-7xl mx-auto{% if not controls_unlocked %} app-locked{% endif %}" {% if not controls_unlocked %}inert{% endif %} aria-hidden="{{ 'false' if controls_unlocked else 'true' }}" data-auth-unlocked="{{ 'true' if controls_unlocked else 'false' }}">
+    <div id="app-root" class="max-w-7xl mx-auto{% if not controls_unlocked %} app-locked{% endif %}" {% if not controls_unlocked %}inert{% endif %} aria-hidden="{{ 'false' if controls_unlocked else 'true' }}" data-auth-unlocked="{{ 'true' if controls_unlocked else 'false' }}" data-state-signature="{{ state_signature }}" data-server-now="{{ server_now }}">
         <header class="text-center mb-8">
             
             <div class="flex items-center justify-center"> 
@@ -85,6 +85,7 @@
                                         {% if data.slot_data.status == 'RUNNING' %}text-green-600{% elif data.slot_data.status == 'PAUSED' %}text-yellow-600{% else %}text-red-600{% endif %}"
                                     data-seconds-remaining="{{ data.time_remaining_sec }}"
                                     data-status="{{ data.slot_data.status }}"
+                                    data-end-ts="{{ (data.slot_data.start_time + RUN_TIME_SECONDS) if data.slot_data.status == 'RUNNING' and data.slot_data.start_time else 0 }}"
                                     >
                                     {{ data.time_remaining | default('00:00') }}
                                 </p>
@@ -206,7 +207,7 @@
 <div class="mb-6 p-4 bg-indigo-50 rounded-xl border border-indigo-100 shadow-sm flex flex-col items-center">
     <span class="text-xs font-bold text-indigo-400 uppercase tracking-widest mb-1">Session Time Remaining</span>
     
-    <div id="session-timer" class="text-3xl font-mono font-black text-indigo-700" data-remaining="{{ session_time_remaining or 0 }}">
+    <div id="session-timer" class="text-3xl font-mono font-black text-indigo-700" data-session-end-ts="{{ session_end_ts }}">
         {% if session_time_remaining and session_time_remaining > 0 %}
             --:--:--
         {% else %}
