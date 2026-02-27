@@ -176,9 +176,16 @@ def get_next_team_in_queue():
 
 
 def build_state_signature():
+    signature_active_runs = {}
+    for slot_id, run_data in active_runs.items():
+        run_snapshot = dict(run_data)
+        if run_snapshot.get('status') == 'RUNNING':
+            run_snapshot['time_remaining'] = None
+        signature_active_runs[slot_id] = run_snapshot
+
     snapshot = {
         'queue': queue,
-        'active_runs': active_runs,
+        'active_runs': signature_active_runs,
         'session_end_time': session_end_time,
         'run_time_seconds': RUN_TIME_SECONDS,
         'teams_history': teams_history,
