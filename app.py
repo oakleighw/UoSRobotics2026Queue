@@ -700,6 +700,27 @@ def set_team_prefix():
         
     return redirect(url_for('index'))
 
+
+@app.route('/clear_session', methods=['POST'])
+def clear_session():
+    global session_end_time
+
+    queue.clear()
+    teams_history.clear()
+    session_end_time = None
+
+    for slot_id in active_runs:
+        active_runs[slot_id] = {
+            'team_id': None,
+            'start_time': None,
+            'status': 'IDLE',
+            'time_paused_at': None,
+            'time_remaining': None
+        }
+
+    flash('Session cleared. All teams, queues, active runs, and tally data were reset.', 'warning')
+    return redirect(url_for('index'))
+
 if __name__ == '__main__':
     # Initial seed data for testing the new sorting
     # TEST CASE SCENARIO:

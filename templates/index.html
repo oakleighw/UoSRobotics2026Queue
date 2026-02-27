@@ -329,6 +329,17 @@
                         class="flex-1 p-2 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500" placeholder="e.g., Team, Group, T" />
                     <button type="submit" class="bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-2 px-4 rounded-lg transition duration-150">Update</button>
                 </form>
+
+                <div class="pt-4 border-t border-gray-300">
+                    <h3 class="text-xl font-bold text-red-700">Clear Session</h3>
+                    <p class="text-sm text-gray-500 mb-2">Resets all current data (waiting list, review queue, active runs, tally, and session timer).</p>
+                    <form action="{{ url_for('clear_session') }}" method="post"
+                        onsubmit="return confirmAction('CLEAR SESSION', '⚠️ WARNING: This will clear all teams from waiting/review/active runs and erase the tally for this session. This cannot be undone. Continue?')">
+                        <button type="submit" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg transition duration-150">
+                            Clear Session
+                        </button>
+                    </form>
+                </div>
             </div>
     </div>
     
