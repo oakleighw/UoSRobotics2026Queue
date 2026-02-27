@@ -1,10 +1,15 @@
-from flask import Flask, render_template, request, redirect, url_for, flash
+from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify
 import time
 import re
+import os
 from datetime import datetime, timedelta
 
 app = Flask(__name__)
-app.secret_key = 'supersecretkey'
+app.secret_key = os.getenv('FLASK_SECRET_KEY', 'dev-only-change-me')
+
+AUTH_USERNAME = os.getenv('QUEUE_AUTH_USERNAME', 'oakleighsrosq')
+AUTH_PASSWORD = os.getenv('QUEUE_AUTH_PASSWORD', 'DiamondROSArena26P4ss')
+AUTH_SESSION_KEY = 'controls_unlocked'
 
 # Global State
 queue = []
@@ -169,6 +174,43 @@ def get_next_team_in_queue():
 
 # --- Flask Routes ---
 
+@app.before_request
+def require_auth_for_post_actions():
+    if request.method != 'POST':
+        return
+
+    if request.endpoint in ('auth_login', 'auth_logout'):
+        return
+
+    if session.get(AUTH_SESSION_KEY):
+        return
+
+    if request.is_json:
+        return jsonify({'ok': False, 'error': 'Authentication required.'}), 401
+
+    flash('Please sign in to use controls.', 'error')
+    return redirect(url_for('index'))
+
+
+@app.route('/auth/login', methods=['POST'])
+def auth_login():
+    payload = request.get_json(silent=True) or {}
+    username = str(payload.get('username', '')).strip()
+    password = str(payload.get('password', ''))
+
+    if username == AUTH_USERNAME and password == AUTH_PASSWORD:
+        session[AUTH_SESSION_KEY] = True
+        return jsonify({'ok': True})
+
+    session.pop(AUTH_SESSION_KEY, None)
+    return jsonify({'ok': False, 'error': 'Incorrect username or password.'}), 401
+
+
+@app.route('/auth/logout', methods=['POST'])
+def auth_logout():
+    session.pop(AUTH_SESSION_KEY, None)
+    return jsonify({'ok': True})
+
 @app.route('/')
 def index():
     # 1. Update/Clean up active runs and calculate remaining time
@@ -223,6 +265,7 @@ def index():
                            RUN_TIME_SECONDS=RUN_TIME_SECONDS,
                            teams_history=teams_history,
                            TEAM_PREFIX=TEAM_PREFIX,
+                           controls_unlocked=bool(session.get(AUTH_SESSION_KEY)),
                            session_time_remaining=session_rem,
                            session_active=(session_end_time is not None),
                            total_potential_slots=total_potential_slots,

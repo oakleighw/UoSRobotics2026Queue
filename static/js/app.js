@@ -4,9 +4,8 @@ function confirmAction(action, message) {
 }
 
 const AUTH_CONFIG = {
-    username: 'oakleighsrosq',
-    password: 'DiamondROSArena26P4ss',
-    sessionKey: 'queue_controls_unlocked'
+    loginEndpoint: '/auth/login',
+    logoutEndpoint: '/auth/logout'
 };
 
 function initializeInteractionGate() {
@@ -18,6 +17,7 @@ function initializeInteractionGate() {
     const authError = document.getElementById('auth-error');
     const authCloseBtn = document.getElementById('auth-close-btn');
     const authOpenBtn = document.getElementById('auth-open-btn');
+    let isUnlocked = appRoot.getAttribute('data-auth-unlocked') === 'true';
 
     if (!overlay || !appRoot || !authForm || !authUser || !authPass || !authError || !authCloseBtn || !authOpenBtn) {
         return;
@@ -25,36 +25,43 @@ function initializeInteractionGate() {
 
     const showOverlay = () => {
         overlay.classList.remove('hidden');
-        authOpenBtn.classList.add('hidden');
         authUser.focus();
     };
 
     const hideOverlay = () => {
         overlay.classList.add('hidden');
-        authOpenBtn.classList.remove('hidden');
+    };
+
+    const setAuthButtonState = () => {
+        authOpenBtn.textContent = isUnlocked ? 'Logout' : 'Login';
+        authOpenBtn.setAttribute('aria-label', isUnlocked ? 'Log out' : 'Open login');
     };
 
     const lockApp = () => {
+        isUnlocked = false;
+        appRoot.setAttribute('data-auth-unlocked', 'false');
         appRoot.classList.add('app-locked');
         appRoot.setAttribute('inert', '');
         appRoot.setAttribute('aria-hidden', 'true');
-        showOverlay();
+        hideOverlay();
+        setAuthButtonState();
     };
 
     const unlockApp = () => {
+        isUnlocked = true;
+        appRoot.setAttribute('data-auth-unlocked', 'true');
         appRoot.classList.remove('app-locked');
         appRoot.removeAttribute('inert');
         appRoot.setAttribute('aria-hidden', 'false');
-        overlay.classList.add('hidden');
-        authOpenBtn.classList.add('hidden');
+        hideOverlay();
+        setAuthButtonState();
     };
 
-    if (sessionStorage.getItem(AUTH_CONFIG.sessionKey) === 'true') {
+    if (isUnlocked) {
         unlockApp();
-        return;
+    } else {
+        lockApp();
     }
-
-    lockApp();
 
     authCloseBtn.addEventListener('click', () => {
         authError.textContent = '';
@@ -68,26 +75,59 @@ function initializeInteractionGate() {
         }
     });
 
-    authOpenBtn.addEventListener('click', () => {
+    authOpenBtn.addEventListener('click', async () => {
+        if (isUnlocked) {
+            try {
+                const response = await fetch(AUTH_CONFIG.logoutEndpoint, { method: 'POST' });
+                if (!response.ok) {
+                    return;
+                }
+            } catch (error) {
+                return;
+            }
+
+            authError.textContent = '';
+            authForm.reset();
+            lockApp();
+            return;
+        }
+
         showOverlay();
     });
 
-    authForm.addEventListener('submit', (event) => {
+    authForm.addEventListener('submit', async (event) => {
         event.preventDefault();
 
         const enteredUser = authUser.value.trim();
         const enteredPass = authPass.value;
 
-        if (enteredUser === AUTH_CONFIG.username && enteredPass === AUTH_CONFIG.password) {
-            sessionStorage.setItem(AUTH_CONFIG.sessionKey, 'true');
-            authError.textContent = '';
-            unlockApp();
-            return;
-        }
+        try {
+            const response = await fetch(AUTH_CONFIG.loginEndpoint, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    username: enteredUser,
+                    password: enteredPass
+                })
+            });
 
-        authError.textContent = 'Incorrect username or password.';
-        authPass.value = '';
-        authPass.focus();
+            const result = await response.json().catch(() => ({}));
+
+            if (response.ok && result.ok) {
+                authError.textContent = '';
+                authForm.reset();
+                unlockApp();
+                return;
+            }
+
+            authError.textContent = result.error || 'Incorrect username or password.';
+            authPass.value = '';
+            authPass.focus();
+        } catch (error) {
+            authError.textContent = 'Login failed. Please try again.';
+        }
     });
 }
 

@@ -34,6 +34,19 @@ In directory context:
 python app.py
 ```
 
+## Security Environment Variables for PythonAnywhere (recommended)
+
+Set these in your host environment (for PythonAnywhere, add them in your web app config / WSGI setup):
+
+```Bash
+FLASK_SECRET_KEY= ""
+QUEUE_AUTH_USERNAME=""
+QUEUE_AUTH_PASSWORD=""
+```
+
+- `FLASK_SECRET_KEY` protects Flask sessions/cookies.
+- `QUEUE_AUTH_USERNAME` and `QUEUE_AUTH_PASSWORD` control the staff login.
+
 ## 💡 Instructions
 
 ### 1. Joining the Queue
