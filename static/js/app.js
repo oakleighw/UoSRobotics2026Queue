@@ -3,6 +3,94 @@ function confirmAction(action, message) {
     return confirm(message);
 }
 
+const AUTH_CONFIG = {
+    username: 'oakleighsrosq',
+    password: 'DiamondROSArena26P4ss',
+    sessionKey: 'queue_controls_unlocked'
+};
+
+function initializeInteractionGate() {
+    const overlay = document.getElementById('auth-overlay');
+    const appRoot = document.getElementById('app-root');
+    const authForm = document.getElementById('auth-form');
+    const authUser = document.getElementById('auth-username');
+    const authPass = document.getElementById('auth-password');
+    const authError = document.getElementById('auth-error');
+    const authCloseBtn = document.getElementById('auth-close-btn');
+    const authOpenBtn = document.getElementById('auth-open-btn');
+
+    if (!overlay || !appRoot || !authForm || !authUser || !authPass || !authError || !authCloseBtn || !authOpenBtn) {
+        return;
+    }
+
+    const showOverlay = () => {
+        overlay.classList.remove('hidden');
+        authOpenBtn.classList.add('hidden');
+        authUser.focus();
+    };
+
+    const hideOverlay = () => {
+        overlay.classList.add('hidden');
+        authOpenBtn.classList.remove('hidden');
+    };
+
+    const lockApp = () => {
+        appRoot.classList.add('app-locked');
+        appRoot.setAttribute('inert', '');
+        appRoot.setAttribute('aria-hidden', 'true');
+        showOverlay();
+    };
+
+    const unlockApp = () => {
+        appRoot.classList.remove('app-locked');
+        appRoot.removeAttribute('inert');
+        appRoot.setAttribute('aria-hidden', 'false');
+        overlay.classList.add('hidden');
+        authOpenBtn.classList.add('hidden');
+    };
+
+    if (sessionStorage.getItem(AUTH_CONFIG.sessionKey) === 'true') {
+        unlockApp();
+        return;
+    }
+
+    lockApp();
+
+    authCloseBtn.addEventListener('click', () => {
+        authError.textContent = '';
+        hideOverlay();
+    });
+
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && !overlay.classList.contains('hidden') && appRoot.classList.contains('app-locked')) {
+            authError.textContent = '';
+            hideOverlay();
+        }
+    });
+
+    authOpenBtn.addEventListener('click', () => {
+        showOverlay();
+    });
+
+    authForm.addEventListener('submit', (event) => {
+        event.preventDefault();
+
+        const enteredUser = authUser.value.trim();
+        const enteredPass = authPass.value;
+
+        if (enteredUser === AUTH_CONFIG.username && enteredPass === AUTH_CONFIG.password) {
+            sessionStorage.setItem(AUTH_CONFIG.sessionKey, 'true');
+            authError.textContent = '';
+            unlockApp();
+            return;
+        }
+
+        authError.textContent = 'Incorrect username or password.';
+        authPass.value = '';
+        authPass.focus();
+    });
+}
+
 // Timer Logic
 function formatTime(seconds) {
     const minutes = Math.floor(seconds / 60);
@@ -67,6 +155,8 @@ function filterTally() {
         });
     }
 }
+
+initializeInteractionGate();
 
 // Update timers every second
 setInterval(updateTimers, 1000);
