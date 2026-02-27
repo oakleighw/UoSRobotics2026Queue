@@ -7,7 +7,23 @@ Manage team runs and status for 4 concurrent arena slots.
 
 Python
 
-## Installation
+# Installing on WSL Laptops
+
+To save time, you can clone this repo into the WSL-ROS2 environment (git & python already installed):
+
+```Bash
+git clone https://github.com/oakleighw/UoSRobotics2026Queue.git
+```
+Then run the following to install flask (into a new environment) within the WSL instance:
+
+```Bash
+python3 -m venv venv
+source venv/bin/activate
+pip install flask
+```
+## Installation (everywhere else)
+Ensuring python is installed:
+
 ```Bash
 pip install flask
 ```
