@@ -753,6 +753,29 @@ def re_add_to_queue():
     flash(message, category)
     return redirect(url_for('index'))
 
+
+@app.route('/adjust_team_runs', methods=['POST'])
+def adjust_team_runs():
+    team_id = request.form.get('team_id', '').strip()
+    direction = request.form.get('direction', '').strip().lower()
+
+    if team_id not in teams_history:
+        flash(f'{team_id} not found in team tally.', 'error')
+        return redirect(url_for('index'))
+
+    current_runs = int(teams_history.get(team_id, 0))
+
+    if direction == 'up':
+        teams_history[team_id] = current_runs + 1
+        flash(f'{team_id} run tally increased to {teams_history[team_id]}.', 'success')
+    elif direction == 'down':
+        teams_history[team_id] = max(0, current_runs - 1)
+        flash(f'{team_id} run tally reduced to {teams_history[team_id]}.', 'warning')
+    else:
+        flash('Invalid run tally adjustment request.', 'error')
+
+    return redirect(url_for('index'))
+
 @app.route('/delete_team_completely', methods=['POST'])
 def delete_team_completely():
     global teams_history, queue

@@ -89,6 +89,8 @@ After a run ends or is marked dysfunctional and cancelled, it moves to the **Rev
 
 * Use the search bar to filter for specific teams.
 
+* **Manual Run Override (▲/▼):** Adjust a team's run count up or down directly from the tally. Waiting queue priority/sorting uses this updated run count.
+
 * **Re-add (🔄):** Adds a team back to the **Waiting Queue** for another run (don't have to enter manually).
 
 * **Delete (🗑️):** Permanently deletes the team and all run history (use with caution).

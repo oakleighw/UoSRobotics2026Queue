@@ -424,7 +424,25 @@
                 <div class="flex justify-between items-center p-2 bg-white rounded-lg shadow-sm border border-blue-100">
                     <span class="font-semibold text-gray-800">{{ team_id }}</span>
                     <div class="flex items-center space-x-3">
+                        <form action="{{ url_for('adjust_team_runs') }}" method="post" class="inline-block">
+                            <input type="hidden" name="team_id" value="{{ team_id }}">
+                            <input type="hidden" name="direction" value="down">
+                            <button type="submit"
+                                class="text-yellow-700 hover:text-white p-1 rounded-full bg-yellow-100 hover:bg-yellow-600 transition duration-150 text-sm font-semibold px-2"
+                                title="Decrease run tally by 1">
+                                ▼
+                            </button>
+                        </form>
                         <span class="text-xl font-extrabold text-blue-600">{{ count }}</span>
+                        <form action="{{ url_for('adjust_team_runs') }}" method="post" class="inline-block">
+                            <input type="hidden" name="team_id" value="{{ team_id }}">
+                            <input type="hidden" name="direction" value="up">
+                            <button type="submit"
+                                class="text-green-700 hover:text-white p-1 rounded-full bg-green-100 hover:bg-green-600 transition duration-150 text-sm font-semibold px-2"
+                                title="Increase run tally by 1">
+                                ▲
+                            </button>
+                        </form>
                         
                         <form action="{{ url_for('re_add_to_queue') }}" method="post" class="inline-block">
                             <input type="hidden" name="team_id" value="{{ team_id }}">
@@ -520,6 +538,7 @@
                     <ul class="list-disc list-inside text-gray-600 space-y-2">
                         <li>Shows the total number of <b>Successful</b> runs completed by each team.</li>
                         <li>Use the search bar to filter for specific teams.</li>
+                        <li><b>Manual Run Override (▲/▼):</b> Adjust a team's run count up or down. Queue priority sorting will use this updated tally value.</li>
                         <li><b>Re-add (🔄):</b> Adds a team back to the <b>Waiting Queue</b> for another run (don't have to enter manually).</li>
                         <li><b>Delete (🗑️):</b> Permanently deletes the team and all run history (use with caution).</li>
                     </ul>
