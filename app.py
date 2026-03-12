@@ -557,6 +557,31 @@ def handle_review_action(team_id, action_status, clear_flag):
         
     return redirect(url_for('index'))
 
+
+def add_team_to_waiting_queue(team_id, *, priority_re_run=False):
+    """Add a team to the waiting queue after validation checks."""
+    if not team_id:
+        return 'error', 'Team ID not provided.'
+
+    if any(item['team_id'] == team_id and item['status'] in ('WAITING', 'RUNNING', 'PAUSED', 'DYSFUNCTIONAL') for item in queue):
+        return 'warning', f'Team {team_id} is currently running, paused, or already in the waiting queue.'
+
+    if any(item['team_id'] == team_id and item['status'] == 'REVIEW' for item in queue):
+        return 'warning', f'Team {team_id} is in the REVIEW Queue and must be resolved before being re-added.'
+
+    if is_queue_full():
+        return 'error', f'🚫 <strong>Queue Full:</strong> Cannot re-add {team_id}. No time left in session.'
+
+    queue.append({
+        'team_id': team_id,
+        'status': 'WAITING',
+        'priority_re_run': priority_re_run,
+        'priority_order': None,
+        'time_added': time.time()
+    })
+
+    return 'success', f'Team {team_id} re-added to the waiting queue.'
+
 def _apply_priority_move(team_id, direction):
     """Move a priority team up (direction=-1) or down (+1) one step in the full waiting list."""
     ordered = sort_waiting_queue_priority(queue, teams_history)
@@ -614,39 +639,35 @@ def mark_canceled():
     return handle_review_action(team_id, 'CANCELED', True)
 
 
+@app.route('/review_re_add_to_queue', methods=['POST'])
+def review_re_add_to_queue():
+    team_id = request.form['team_id']
+    team_index = next((i for i, item in enumerate(queue) if item['team_id'] == team_id and item['status'] == 'REVIEW'), None)
+
+    if team_index is None:
+        flash(f'{team_id} not found in the review queue.', 'error')
+        return redirect(url_for('index'))
+
+    review_team = queue.pop(team_index)
+    category, message = add_team_to_waiting_queue(team_id)
+
+    if category != 'success':
+        queue.insert(team_index, review_team)
+        flash(message, category)
+        return redirect(url_for('index'))
+
+    teams_history[team_id] = teams_history.get(team_id, 0) + 1
+    flash(f'{team_id} marked as SUCCESSFUL and re-added to the waiting queue.', 'success')
+    return redirect(url_for('index'))
+
+
 # --- Team Management Actions ---
 @app.route('/re_add_to_queue', methods=['POST'])
 def re_add_to_queue():
     team_id = request.form['team_id']
-    
-    if not team_id:
-        flash('Team ID not provided.', 'error')
-        return redirect(url_for('index'))
-        
-    # Check if the team is already running or waiting
-    if any(item['team_id'] == team_id and item['status'] in ('WAITING', 'RUNNING', 'PAUSED', 'DYSFUNCTIONAL') for item in queue):
-        flash(f'Team {team_id} is currently running, paused, or already in the waiting queue.', 'warning')
-        return redirect(url_for('index'))
 
-    # Check if the team is in the review queue and prevent adding
-    if any(item['team_id'] == team_id and item['status'] == 'REVIEW' for item in queue):
-        flash(f'Team {team_id} is in the REVIEW Queue and must be resolved before being re-added.', 'warning')
-        return redirect(url_for('index'))
-    
-    if is_queue_full():
-        flash(f'🚫 <strong>Queue Full:</strong> Cannot re-add {team_id}. No time left in session.', 'error')
-        return redirect(url_for('index'))
-    
-    # The team already exists in teams_history, so we don't need to initialize the count.
-    
-    # Add team back to the queue
-    queue.append({
-        'team_id': team_id,
-        'status': 'WAITING',
-        'priority_re_run': False, # Not a priority re-run by default, unless manually added later
-        'time_added': time.time()
-    })
-    flash(f'Team {team_id} re-added to the waiting queue.', 'success')
+    category, message = add_team_to_waiting_queue(team_id)
+    flash(message, category)
     return redirect(url_for('index'))
 
 @app.route('/delete_team_completely', methods=['POST'])
