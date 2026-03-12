@@ -135,6 +135,39 @@ def get_additional_capacity():
 
     return additional_capacity
 
+
+def get_waiting_turn_warnings(sorted_waiting_teams):
+    """Returns map of team_id -> True if the team may not get a turn this session."""
+    if session_end_time is None:
+        return {}
+
+    session_left = session_end_time - time.time()
+    if session_left <= 0:
+        return {team['team_id']: True for team in sorted_waiting_teams}
+
+    slot_finish_times = []
+    for slot_id in range(1, ARENA_SLOT_COUNT + 1):
+        data = active_runs.get(slot_id)
+        if data and data['status'] in ('RUNNING', 'PAUSED', 'DYSFUNCTIONAL'):
+            slot_finish_times.append(get_time_remaining(data))
+        else:
+            slot_finish_times.append(0)
+
+    review_count = sum(1 for team in queue if team['status'] == 'REVIEW')
+    for _ in range(review_count):
+        slot_finish_times.sort()
+        slot_finish_times[0] += RUN_TIME_SECONDS
+
+    warnings = {}
+    for team in sorted_waiting_teams:
+        slot_finish_times.sort()
+        projected_finish = slot_finish_times[0] + RUN_TIME_SECONDS
+        will_fit = projected_finish <= session_left
+        warnings[team['team_id']] = not will_fit
+        slot_finish_times[0] = projected_finish
+
+    return warnings
+
 # --- NEW PRIORITY SORTING FUNCTION ---
 
 def sort_waiting_queue_priority(queue_list, history):
@@ -316,8 +349,10 @@ def index():
     # NOTE: The *main* queue list `queue` is *not* permanently re-ordered here,
     # only the WAITING subset of teams is sorted for display/selection.
     # We create a temporary list to send to the template:
+    sorted_waiting_teams = sort_waiting_queue_priority(queue, teams_history)
     display_queue = [team for team in queue if team['status'] != 'WAITING']
-    display_queue.extend(sort_waiting_queue_priority(queue, teams_history))
+    display_queue.extend(sorted_waiting_teams)
+    waiting_turn_warnings = get_waiting_turn_warnings(sorted_waiting_teams)
 
 
     # 3. Get the *actual* next team object for the idle slot buttons
@@ -343,6 +378,7 @@ def index():
                            RUN_TIME_SECONDS=RUN_TIME_SECONDS,
                            arena_slot_count=ARENA_SLOT_COUNT,
                            max_arena_slots=MAX_ARENA_SLOTS,
+                           waiting_turn_warnings=waiting_turn_warnings,
                            teams_history=teams_history,
                            TEAM_PREFIX=TEAM_PREFIX,
                            controls_unlocked=bool(session.get(AUTH_SESSION_KEY)),

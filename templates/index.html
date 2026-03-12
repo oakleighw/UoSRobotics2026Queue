@@ -260,8 +260,11 @@
                 {% if waiting_teams|length > 0 %}
                     
                         {% for team in waiting_teams %}
+                            {% set may_not_get_turn = waiting_turn_warnings.get(team.team_id, false) %}
                             <div class="p-3 border-b flex justify-between items-center 
-                                {% if loop.index == 1 and next_waiting_team and next_waiting_team.team_id == team.team_id %} 
+                                {% if may_not_get_turn %}
+                                    bg-red-50 border-red-300
+                                {% elif loop.index == 1 and next_waiting_team and next_waiting_team.team_id == team.team_id %} 
                                     bg-indigo-50 border-indigo-300 font-semibold 
                                 {% else %} 
                                     bg-gray-50 border-gray-200
@@ -271,6 +274,9 @@
                                     <span class="font-bold">{{ team.team_id }}</span>
                                     {% if team.priority_re_run %}
                                     <span class="block text-red-500 text-sm">(Priority Re-run)</span>
+                                    {% endif %}
+                                    {% if may_not_get_turn %}
+                                    <span class="block text-red-600 text-xs font-semibold">May not get turn this session</span>
                                     {% endif %}
                                 </span>
                                 <div class="flex items-center space-x-2">
