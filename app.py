@@ -126,44 +126,50 @@ def get_additional_capacity():
 
 def sort_waiting_queue_priority(queue_list, history):
     """
-    Sorts the waiting queue based on the new custom rules:
+    Sorts the waiting queue based on the custom rules:
     1. Highest Priority (Tier 1): Teams with 0 total successful runs.
-    2. Secondary Priority (Tier 2): Teams with priority_re_run == True (Dysfunctional re-run).
-    3. Tertiary Priority (Tier 3): All other teams, sorted by lowest run count.
-    
-    FIFO (original index) is used as a tie-breaker within each tier.
+    2. Secondary Priority (Tier 2): Teams with priority_re_run == True (Dysfunctional re-run),
+       sorted by run count then FIFO — unless a manual absolute-position override is set.
+    3. Tertiary Priority (Tier 3): All other teams, sorted by lowest run count then FIFO.
+
+    Priority teams with priority_order set (int) are extracted from the natural order
+    and re-inserted at their target absolute index in the final list, allowing them to
+    appear anywhere — including past non-priority teams.
     """
-    
-    # Separate the WAITING teams
+
     waiting_teams = [team for team in queue_list if team['status'] == 'WAITING']
-    
-    def get_sort_key(team):
-        team_id = team['team_id']
-        run_count = history.get(team_id, 0)
+
+    def natural_key(team):
+        run_count = history.get(team['team_id'], 0)
         is_priority = team.get('priority_re_run', False)
-        
-        # We use the team's original index as a final tie-breaker (FIFO)
         fifo_index = queue_list.index(team)
-        
-        # --- TIER DETERMINATION ---
-        
-        # Tier 1 (0): Zero-run teams (Highest priority)
         if run_count == 0:
-            return (0, run_count, fifo_index) # run_count is 0 here
-        
-        # Tier 2 (1): Dysfunctional Re-run teams (Second highest priority)
+            return (0, run_count, fifo_index)
         elif is_priority:
             return (1, run_count, fifo_index)
-            
-        # Tier 3 (2): Standard teams (Lowest priority)
         else:
-            # Within Tier 3, we still sort by lowest run count first
-            return (2, run_count, fifo_index) 
+            return (2, run_count, fifo_index)
 
-    # Sort the waiting teams using the custom key
-    sorted_waiting_teams = sorted(waiting_teams, key=get_sort_key)
-    
-    return sorted_waiting_teams
+    # Build the naturally-sorted list
+    natural_order = sorted(waiting_teams, key=natural_key)
+
+    # Identify priority teams with a manual absolute-position override
+    manual_teams = {
+        t['team_id']: t
+        for t in waiting_teams
+        if t.get('priority_re_run') and t.get('priority_order') is not None
+    }
+
+    if not manual_teams:
+        return natural_order
+
+    # Remove manually-placed teams from the natural order, then re-insert at target positions
+    result = [t for t in natural_order if t['team_id'] not in manual_teams]
+    for team in sorted(manual_teams.values(), key=lambda t: t['priority_order']):
+        pos = min(team['priority_order'], len(result))
+        result.insert(pos, team)
+
+    return result
 
 def get_next_team_in_queue():
     """Returns the team_id of the next team to run based on the new priority logic."""
@@ -343,6 +349,7 @@ def join_queue():
         'team_id': team_id,
         'status': 'WAITING',
         'priority_re_run': False,
+        'priority_order': None,
         'time_added': time.time()
     })
     flash(f'{team_id} added successfully!', 'success')
@@ -536,7 +543,9 @@ def handle_review_action(team_id, action_status, clear_flag):
         flash(f'{team_id} run marked as SUCCESSFUL. Run count incremented.', 'success')
         
     elif action_status == 'FAILURE':
-        # Technical Failure means we don't count the run and re-add them to the queue with priority
+        # Technical Failure: re-add to WAITING with priority but no manual order set.
+        # This preserves the default run-count sort within Tier 2 until the user uses arrows.
+        queue[team_index]['priority_order'] = None
         queue[team_index]['status'] = 'WAITING'
         queue[team_index]['priority_re_run'] = True # Ensure they get highest WAITING priority
         flash(f'{team_id} run marked as TECHNICAL FAILURE. Re-added to waiting queue with PRIORITY.', 'warning')
@@ -547,6 +556,46 @@ def handle_review_action(team_id, action_status, clear_flag):
         flash(f'{team_id} run marked as CANCELED. Run count not affected.', 'error')
         
     return redirect(url_for('index'))
+
+def _apply_priority_move(team_id, direction):
+    """Move a priority team up (direction=-1) or down (+1) one step in the full waiting list."""
+    ordered = sort_waiting_queue_priority(queue, teams_history)
+    idx = next((i for i, t in enumerate(ordered) if t['team_id'] == team_id), None)
+    if idx is None:
+        return
+    new_idx = idx + direction
+    if new_idx < 0 or new_idx >= len(ordered):
+        return
+    # Perform the swap
+    ordered[idx], ordered[new_idx] = ordered[new_idx], ordered[idx]
+    # Record the moved priority team's new absolute position
+    ordered[new_idx]['priority_order'] = new_idx
+    # If the displaced team is also a priority team, record its new position too
+    displaced = ordered[idx]
+    if displaced.get('priority_re_run'):
+        displaced['priority_order'] = idx
+
+
+@app.route('/move_priority_up', methods=['POST'])
+def move_priority_up():
+    _apply_priority_move(request.form['team_id'], -1)
+    return redirect(url_for('index'))
+
+
+@app.route('/move_priority_down', methods=['POST'])
+def move_priority_down():
+    _apply_priority_move(request.form['team_id'], +1)
+    return redirect(url_for('index'))
+
+
+@app.route('/reset_priority_order', methods=['POST'])
+def reset_priority_order():
+    team_id = request.form['team_id']
+    team = next((t for t in queue if t['team_id'] == team_id and t['status'] == 'WAITING' and t.get('priority_re_run')), None)
+    if team is not None:
+        team['priority_order'] = None
+    return redirect(url_for('index'))
+
 
 @app.route('/mark_success', methods=['POST'])
 def mark_success():

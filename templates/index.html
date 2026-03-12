@@ -258,9 +258,44 @@
                                 <span class="text-lg">
                                     #{{ loop.index }}. 
                                     <span class="font-bold">{{ team.team_id }}</span>
-                                    {% if team.priority_re_run %}<span class="text-red-500 text-sm ml-2">(Priority Re-run)</span>{% endif %}
+                                    {% if team.priority_re_run %}
+                                    <span class="block text-red-500 text-sm">(Priority Re-run)</span>
+                                    {% endif %}
                                 </span>
                                 <div class="flex items-center space-x-2">
+
+    {% if team.priority_re_run and controls_unlocked %}
+        <form action="{{ url_for('move_priority_up') }}" method="post" class="inline-block">
+            <input type="hidden" name="team_id" value="{{ team.team_id }}">
+            <button type="submit"
+                    {% if loop.first %}disabled{% endif %}
+                    class="text-red-500 hover:text-red-700 p-1 rounded-full hover:bg-red-100 transition duration-150 disabled:opacity-30 disabled:cursor-not-allowed"
+                    title="Move up in queue">
+                ▲
+            </button>
+        </form>
+        <form action="{{ url_for('move_priority_down') }}" method="post" class="inline-block">
+            <input type="hidden" name="team_id" value="{{ team.team_id }}">
+            <button type="submit"
+                    {% if loop.last %}disabled{% endif %}
+                    class="text-red-500 hover:text-red-700 p-1 rounded-full hover:bg-red-100 transition duration-150 disabled:opacity-30 disabled:cursor-not-allowed"
+                    title="Move down in queue">
+                ▼
+            </button>
+        </form>
+        {% if team.priority_order is not none %}
+        <form action="{{ url_for('reset_priority_order') }}" method="post" class="inline-block"
+              onsubmit="return confirm('Reset manual order for {{ team.team_id }}? It will return to default run-count sorting.')">
+            <input type="hidden" name="team_id" value="{{ team.team_id }}">
+            <button type="submit"
+                    class="text-gray-400 hover:text-gray-700 p-1 rounded-full hover:bg-gray-100 transition duration-150 text-xs font-bold"
+                    title="Reset to default priority order (run count)">
+                ↺
+            </button>
+        </form>
+        {% endif %}
+    {% endif %}
+
     <span class="text-sm text-gray-500">
         Runs: <span class="font-semibold text-gray-700">{{ teams_history.get(team.team_id, 0) }}</span>
     </span>
@@ -442,7 +477,17 @@
                 </div>
 
                 <div>
-                    <h3 class="text-xl font-semibold mb-3 text-indigo-600">6. Team Runs Tally</h3>
+                    <h3 class="text-xl font-semibold mb-3 text-indigo-600">6. Priority Re-runs</h3>
+                    <ul class="list-disc list-inside text-gray-600 space-y-2">
+                        <li>When a team is marked <b>FAILURE</b>, it returns to the <b>Waiting Queue</b> as a <b>Priority Re-run</b>.</li>
+                        <li>Priority teams still follow the default queue sorting unless you manually override them.</li>
+                        <li>Use <b>▲</b> and <b>▼</b> on a priority team to move it up or down in the full <b>Waiting Queue</b>, including swapping past non-priority teams.</li>
+                        <li>If a priority team has been manually moved, use <b>↺</b> to clear the override and return it to the default sorting logic.</li>
+                    </ul>
+                </div>
+
+                <div>
+                    <h3 class="text-xl font-semibold mb-3 text-indigo-600">7. Team Runs Tally</h3>
                     <ul class="list-disc list-inside text-gray-600 space-y-2">
                         <li>Shows the total number of <b>Successful</b> runs completed by each team.</li>
                         <li>Use the search bar to filter for specific teams.</li>
