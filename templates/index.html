@@ -49,7 +49,7 @@
                 <img src="{{ url_for('static', filename='images/waffle.png') }}" alt="Waffle Icon" class="h-10 w-auto object-contain ml-2"> 
             </div>
 
-            <p class="text-gray-500 mt-2">Manage team runs and status for 4 concurrent arena slots.</p>
+            <p class="text-gray-500 mt-2">Manage team runs and status for {{ arena_slot_count }} concurrent arena slot{{ '' if arena_slot_count == 1 else 's' }}.</p>
         </header>
        {% with messages = get_flashed_messages(with_categories=true) %}
         {% if messages %}
@@ -376,6 +376,15 @@
                     <button type="submit" class="bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-2 px-4 rounded-lg transition duration-150">Update</button>
                 </form>
 
+                <h3 class="text-xl font-bold text-gray-700">Arena Slot Count</h3>
+                <p class="text-sm text-gray-500">Current Slots: <span class="font-bold text-gray-700">{{ arena_slot_count }}</span> (Maximum {{ max_arena_slots }})</p>
+                <form action="{{ url_for('set_arena_slots') }}" method="post" class="flex space-x-2">
+                    <input type="number" name="arena_slot_count" min="1" max="{{ max_arena_slots }}" value="{{ arena_slot_count }}" required
+                        class="flex-1 p-2 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500" />
+                    <button type="submit" class="bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-2 px-4 rounded-lg transition duration-150">Update</button>
+                </form>
+                <p class="text-xs text-gray-500">You cannot reduce slot count below currently active slots.</p>
+
                 <div class="pt-4 border-t border-gray-300">
                     <h3 class="text-xl font-bold text-red-700">Clear Session</h3>
                     <p class="text-sm text-gray-500 mb-2">Resets all current data (waiting list, review queue, active runs, tally, and session timer).</p>
@@ -444,9 +453,11 @@
                 <div>
                     <h3 class="text-xl font-semibold mb-3 text-indigo-600">1. Settings</h3>
                     <ul class="list-disc list-inside text-gray-600 space-y-2">
-                        <li><b>Set Session Time Limit:</b> Change the duration remaining (in minutes) for a robotics session. Effects waiting queue limits at reduced times.</li>
+                        <li><b>Set Session Time Limit:</b> Change the duration remaining (in minutes) for a robotics session. Affects waiting queue limits at reduced times.</li>
                         <li><b>Set Run Time:</b> Change the standard length of time (in minutes) for a robot run.</li>
                         <li><b>Team Name Prefix:</b> Change the display prefix for all teams (e.g., change from "Team _" to "Group _").</li>
+                        <li><b>Arena Slot Count:</b> Set active arena slots from 1 to {{ max_arena_slots }}. You cannot reduce below currently active slots.</li>
+                        <li><b>Clear Session:</b> Resets waiting queue, review queue, active runs, tally, and session timer for a fresh session.</li>
                     </ul>
                 </div>
 

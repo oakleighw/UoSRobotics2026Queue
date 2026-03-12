@@ -13,14 +13,27 @@ AUTH_USERNAME = os.getenv('QUEUE_AUTH_USERNAME', 'oakleighsrosq')
 AUTH_PASSWORD = os.getenv('QUEUE_AUTH_PASSWORD', 'DiamondROSArena26P4ss')
 AUTH_SESSION_KEY = 'controls_unlocked'
 
+MAX_ARENA_SLOTS = 4
+ARENA_SLOT_COUNT = 4
+
+
+def build_idle_slot():
+    return {
+        'team_id': None,
+        'start_time': None,
+        'status': 'IDLE',
+        'time_paused_at': None,
+        'time_remaining': None
+    }
+
+
+def build_active_runs(slot_count):
+    return {slot_id: build_idle_slot() for slot_id in range(1, slot_count + 1)}
+
+
 # Global State
 queue = []
-active_runs = {
-    1: {'team_id': None, 'start_time': None, 'status': 'IDLE', 'time_paused_at': None, 'time_remaining': None},
-    2: {'team_id': None, 'start_time': None, 'status': 'IDLE', 'time_paused_at': None, 'time_remaining': None},
-    3: {'team_id': None, 'start_time': None, 'status': 'IDLE', 'time_paused_at': None, 'time_remaining': None},
-    4: {'team_id': None, 'start_time': None, 'status': 'IDLE', 'time_paused_at': None, 'time_remaining': None},
-}
+active_runs = build_active_runs(ARENA_SLOT_COUNT)
 
 # Global session time
 session_end_time = None  # Stores the Unix timestamp when the session ends
@@ -67,7 +80,7 @@ def get_time_remaining(run_data):
                  queue[team_index]['priority_re_run'] = False
         
         # Clear the active slot
-        active_runs[slot_id] = {'team_id': None, 'start_time': None, 'status': 'IDLE', 'time_paused_at': None, 'time_remaining': None}
+        active_runs[slot_id] = build_idle_slot()
         flash(f'{team_id} run has ended (time out) and moved to REVIEW Queue!', 'warning')
         return 0
 
@@ -97,7 +110,7 @@ def get_additional_capacity():
     
     # 1. Get remaining time for robots in slots
     slot_finish_times = []
-    for slot_id in range(1, 5):
+    for slot_id in range(1, ARENA_SLOT_COUNT + 1):
         data = active_runs.get(slot_id)
         if data and data['status'] in ('RUNNING', 'PAUSED', 'DYSFUNCTIONAL'):
             slot_finish_times.append(get_time_remaining(data))
@@ -192,6 +205,7 @@ def build_state_signature():
     snapshot = {
         'queue': queue,
         'active_runs': signature_active_runs,
+        'arena_slot_count': ARENA_SLOT_COUNT,
         'session_end_time': session_end_time,
         'run_time_seconds': RUN_TIME_SECONDS,
         'teams_history': teams_history,
@@ -269,6 +283,7 @@ def arena_status():
         'session_time_remaining': session_rem,
         'current_load': current_load,
         'total_potential_slots': total_potential_slots,
+        'arena_slot_count': ARENA_SLOT_COUNT,
         'percent_full': int(percent_full),
         'is_full': is_full
     })
@@ -326,6 +341,8 @@ def index():
                            active_runs_display=active_runs_display, 
                            next_waiting_team=next_waiting_team, # This is used by the IDLE slot button
                            RUN_TIME_SECONDS=RUN_TIME_SECONDS,
+                           arena_slot_count=ARENA_SLOT_COUNT,
+                           max_arena_slots=MAX_ARENA_SLOTS,
                            teams_history=teams_history,
                            TEAM_PREFIX=TEAM_PREFIX,
                            controls_unlocked=bool(session.get(AUTH_SESSION_KEY)),
@@ -407,6 +424,10 @@ def remove_from_queue():
 @app.route('/start_run', methods=['POST'])
 def start_run():
     slot_id = int(request.form['slot_id'])
+    run_slot = active_runs.get(slot_id)
+    if run_slot is None:
+        flash(f'Slot {slot_id} does not exist in the current arena layout.', 'error')
+        return redirect(url_for('index'))
     
     # Get the next team according to the *new* priority logic
     team_id_to_start = get_next_team_in_queue()
@@ -415,7 +436,7 @@ def start_run():
         flash('Cannot start run: Waiting queue is empty.', 'error')
         return redirect(url_for('index'))
 
-    if active_runs[slot_id]['status'] != 'IDLE':
+    if run_slot['status'] != 'IDLE':
         flash(f'Slot {slot_id} is not idle.', 'error')
         return redirect(url_for('index'))
 
@@ -545,7 +566,7 @@ def end_run():
             flash(f'{team_id} run in Slot {slot_id} ended and moved to REVIEW Queue.', 'success')
             
         # 2. Clear the active slot
-        active_runs[slot_id] = {'team_id': None, 'start_time': None, 'status': 'IDLE', 'time_paused_at': None, 'time_remaining': None}
+        active_runs[slot_id] = build_idle_slot()
     else:
         flash(f'Slot {slot_id} has no active run to end.', 'error')
         
@@ -736,6 +757,49 @@ def delete_team_completely():
 
 # --- Settings ---
 
+@app.route('/set_arena_slots', methods=['POST'])
+def set_arena_slots():
+    global ARENA_SLOT_COUNT
+
+    try:
+        requested_slots = int(request.form['arena_slot_count'])
+    except (TypeError, ValueError):
+        flash('Invalid slot count. Enter a whole number.', 'error')
+        return redirect(url_for('index'))
+
+    if requested_slots < 1:
+        flash('Arena slot count must be at least 1.', 'error')
+        return redirect(url_for('index'))
+
+    if requested_slots > MAX_ARENA_SLOTS:
+        flash(f'Arena slot count cannot be more than {MAX_ARENA_SLOTS}.', 'error')
+        return redirect(url_for('index'))
+
+    occupied_slots = sum(1 for slot in active_runs.values() if slot['status'] != 'IDLE')
+    if requested_slots < occupied_slots:
+        flash(
+            f'Cannot set slots to {requested_slots} right now. Please wait until no more than '
+            f'{requested_slots} robot slots are running/occupied (currently {occupied_slots}).',
+            'warning'
+        )
+        return redirect(url_for('index'))
+
+    if requested_slots == ARENA_SLOT_COUNT:
+        flash(f'Arena slot count remains at {ARENA_SLOT_COUNT}.', 'info')
+        return redirect(url_for('index'))
+
+    if requested_slots > ARENA_SLOT_COUNT:
+        for slot_id in range(ARENA_SLOT_COUNT + 1, requested_slots + 1):
+            active_runs[slot_id] = build_idle_slot()
+    else:
+        slots_to_remove = [slot_id for slot_id in active_runs.keys() if slot_id > requested_slots]
+        for slot_id in slots_to_remove:
+            del active_runs[slot_id]
+
+    ARENA_SLOT_COUNT = requested_slots
+    flash(f'Arena slot count updated to {ARENA_SLOT_COUNT}.', 'success')
+    return redirect(url_for('index'))
+
 @app.route('/set_run_time', methods=['POST'])
 def set_run_time():
     global RUN_TIME_SECONDS
@@ -806,13 +870,7 @@ def clear_session():
     session_end_time = None
 
     for slot_id in active_runs:
-        active_runs[slot_id] = {
-            'team_id': None,
-            'start_time': None,
-            'status': 'IDLE',
-            'time_paused_at': None,
-            'time_remaining': None
-        }
+        active_runs[slot_id] = build_idle_slot()
 
     flash('Session cleared. All teams, queues, active runs, and tally data were reset.', 'warning')
     return redirect(url_for('index'))

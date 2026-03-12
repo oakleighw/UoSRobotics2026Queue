@@ -95,6 +95,12 @@ After a run ends or is marked dysfunctional and cancelled, it moves to the **Rev
 
 ### 6. Settings
 
+* **Set Session Time Limit:** Change the duration remaining (in minutes) for a robotics session. This affects waiting queue limits when session time gets low.
+
 * **Set Run Time:** Change the standard length of time (in minutes) for a robot run.
 
 * **Team Name Prefix:** Change the display prefix for all teams (e.g., change from "Team _" to "Group _").
+
+* **Arena Slot Count:** Set active arena slots from 1 to 4. You cannot reduce below currently active/occupied slots.
+
+* **Clear Session:** Resets waiting queue, review queue, active runs, tally, and session timer for a fresh session.
