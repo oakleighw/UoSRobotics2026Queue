@@ -220,6 +220,71 @@ function initializeStatePolling() {
     }, 2000);
 }
 
+function initializeArenaStatusPolling() {
+    // Periodically update the arena bar without full page reload
+    setInterval(async () => {
+        try {
+            const response = await fetch('/arena_status', { cache: 'no-store' });
+            if (!response.ok) {
+                return;
+            }
+
+            const data = await response.json();
+            updateArenaBar(data);
+        } catch (error) {
+        }
+    }, 20000); // Update arena bar every 20 seconds
+}
+
+function updateArenaBar(data) {
+    // Update the queue load text
+    const loadTextElem = document.getElementById('arena-bar-load-text');
+    if (loadTextElem) {
+        loadTextElem.textContent = 'Queue Load (' + data.current_load + '/' + data.total_potential_slots + ' runs possible)';
+    }
+
+    // Update the percentage text
+    const percentTextElem = document.getElementById('arena-bar-percent-text');
+    if (percentTextElem) {
+        percentTextElem.textContent = data.percent_full + '%';
+        if (data.is_full) {
+            percentTextElem.className = 'text-red-500';
+        } else {
+            percentTextElem.className = 'text-indigo-500';
+        }
+    }
+
+    // Update the progress bar width and color
+    const progressElem = document.getElementById('arena-bar-progress');
+    if (progressElem) {
+        const barWidth = Math.min(data.percent_full, 100);
+        progressElem.style.width = barWidth + '%';
+        if (data.is_full) {
+            progressElem.className = 'h-1.5 rounded-full transition-all duration-500 bg-red-500';
+        } else {
+            progressElem.className = 'h-1.5 rounded-full transition-all duration-500 bg-indigo-500';
+        }
+    }
+
+    // Update or toggle the "NO MORE TEAMS" warning
+    const warningElem = document.getElementById('arena-bar-full-warning');
+    const containerElem = document.getElementById('arena-bar-container');
+    
+    if (data.is_full) {
+        if (!warningElem && containerElem) {
+            // Create and insert the warning if it doesn't exist
+            const warning = document.createElement('p');
+            warning.id = 'arena-bar-full-warning';
+            warning.className = 'text-[9px] text-red-500 font-bold mt-1 text-center animate-pulse tracking-tighter';
+            warning.textContent = '🚫 NO MORE TEAMS: REMAINING TIME IS FULL';
+            containerElem.appendChild(warning);
+        }
+    } else if (warningElem) {
+        // Remove the warning if queue is no longer full
+        warningElem.remove();
+    }
+}
+
 function filterTally() {
     const input = document.getElementById('tally-search');
     const filter = input.value.toUpperCase();
@@ -244,6 +309,7 @@ function filterTally() {
 
 initializeInteractionGate();
 initializeStatePolling();
+initializeArenaStatusPolling();
 
 // Update timers every second
 setInterval(updateTimers, 1000);

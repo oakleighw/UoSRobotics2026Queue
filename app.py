@@ -247,6 +247,32 @@ def state_version():
         'server_now': time.time()
     })
 
+@app.route('/arena_status', methods=['GET'])
+def arena_status():
+    """Returns current arena/queue status for periodic updates without full page reload."""
+    session_rem = get_session_remaining()
+    
+    # Calculate Queue Load for the Progress Bar
+    additional_capacity = get_additional_capacity() if session_end_time else 0
+    
+    # Current Load = Active + Waiting + Review
+    active_count = sum(1 for s in active_runs.values() if s['team_id'])
+    waiting_count = sum(1 for t in queue if t['status'] == 'WAITING')
+    review_count = sum(1 for t in queue if t['status'] == 'REVIEW')
+    current_load = active_count + waiting_count + review_count
+    total_potential_slots = current_load + additional_capacity
+    
+    percent_full = (current_load / total_potential_slots * 100) if total_potential_slots > 0 else 100
+    is_full = is_queue_full()
+    
+    return jsonify({
+        'session_time_remaining': session_rem,
+        'current_load': current_load,
+        'total_potential_slots': total_potential_slots,
+        'percent_full': int(percent_full),
+        'is_full': is_full
+    })
+
 @app.route('/')
 def index():
     # 1. Update/Clean up active runs and calculate remaining time

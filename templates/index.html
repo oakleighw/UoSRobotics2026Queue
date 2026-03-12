@@ -230,22 +230,22 @@
     {% set percent_full = (current_load / total_potential_slots * 100) | round | int if total_potential_slots > 0 else 100 %}
     {% set bar_width = [percent_full, 100] | min %}
 
-    <div class="w-full mt-3">
+    <div id="arena-bar-container" class="w-full mt-3">
         <div class="flex justify-between text-[10px] font-bold uppercase mb-1">
-            <span class="text-indigo-500">Queue Load ({{ current_load }}/{{ total_potential_slots }} runs possible)</span>
-            <span class="{{ 'text-red-500' if is_full else 'text-indigo-500' }}">
+            <span id="arena-bar-load-text" class="text-indigo-500">Queue Load ({{ current_load }}/{{ total_potential_slots }} runs possible)</span>
+            <span id="arena-bar-percent-text" class="{{ 'text-red-500' if is_full else 'text-indigo-500' }}">
                 {{ percent_full }}%
             </span>
         </div>
         
         <div class="w-full bg-indigo-200 rounded-full h-1.5 overflow-hidden">
-            <div class="h-1.5 rounded-full transition-all duration-500 {{ 'bg-red-500' if is_full else 'bg-indigo-500' }}" 
+            <div id="arena-bar-progress" class="h-1.5 rounded-full transition-all duration-500 {{ 'bg-red-500' if is_full else 'bg-indigo-500' }}" 
                  style="--bar-width: {{ bar_width }}%; width: var(--bar-width);">
             </div>
         </div>
 
         {% if is_full %}
-            <p class="text-[9px] text-red-500 font-bold mt-1 text-center animate-pulse tracking-tighter">
+            <p id="arena-bar-full-warning" class="text-[9px] text-red-500 font-bold mt-1 text-center animate-pulse tracking-tighter">
                 🚫 NO MORE TEAMS: REMAINING TIME IS FULL
             </p>
         {% endif %}
