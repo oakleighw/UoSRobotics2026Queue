@@ -1,6 +1,6 @@
 # Waffle Robotics Arena Run Queue
 
-Manage team runs and status for 4 concurrent arena slots.
+![Waffle Queue Demo](./static/images/waffle_queue_demo.png)
 
 
 # Prerequisites
